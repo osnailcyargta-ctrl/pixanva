@@ -26,7 +26,8 @@ const state = {
 // ---------- worker ----------
 function getWorker() {
   if (!state.worker) {
-    state.worker = new Worker("js/worker.js", { type: "module" });
+    // ?v= rilis — bust cache CDN/browser tiap deploy (Pages cache 10 menit)
+    state.worker = new Worker("js/worker.js?v=qq1", { type: "module" });
     state.worker.onmessage = onWorkerMsg;
     state.worker.onerror = (e) => setStatus("error worker: " + e.message);
   }
