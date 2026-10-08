@@ -359,9 +359,10 @@ function chip(group, el, item, multi, max) {
       }
       b.classList.toggle("on", !has);
     } else {
-      state[group] = state[group] === item.id ? null : item.id;
+      // single-select: selalu terpilih — klik chip yg sama gak boleh me-null (wajib ada pilihan)
+      state[group] = item.id;
       el.querySelectorAll(".chip").forEach((c) => c.classList.remove("on"));
-      if (state[group] === item.id) b.classList.add("on");
+      b.classList.add("on");
     }
   };
   el.appendChild(b);
