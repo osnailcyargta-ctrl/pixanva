@@ -177,10 +177,11 @@ def forward(P, cfg, ids, rope, record=False):
         att += mask
         att -= att.max(-1, keepdims=True)
         np.exp(att, out=att)
-        att += 1e-30              # anti-denormal
+        att += 1e-24              # anti-denormal (floor cukup tinggi biar produk backward aman)
         att /= att.sum(-1, keepdims=True)
         Pm = att
         o = (Pm @ v).transpose(0, 2, 1, 3).reshape(B, T, d)
+        del att
         proj = o @ P[p + "wo"] + P[p + "bo"]
         x_mid = x_in + proj
         h2, xhat2, sg2 = layernorm(x_mid, P[p + "ln2.g"], P[p + "ln2.b"])
@@ -189,9 +190,12 @@ def forward(P, cfg, ids, rope, record=False):
         mlp = a @ P[p + "w2"] + P[p + "b2"]
         x = x_mid + mlp
         if record:
+            # Pm (B,H,T,T) raksasa saat G48 — simpan fp16 biar gak swap-thrash (RAM 3GB)
+            pm_c = Pm.astype(np.float16) if T > 1024 else Pm
             cache["layers"].append(dict(x_in=x_in, x_mid=x_mid, xhat1=xhat1,
-                                        sg1=sg1, qr=qr, kr=kr, v=v, Pm=Pm, o=o,
+                                        sg1=sg1, qr=qr, kr=kr, v=v, Pm=pm_c, o=o,
                                         xhat2=xhat2, sg2=sg2, z=z, a=a))
+            del Pm, pm_c
     hf, xhatf, sgf = layernorm(x, P["lnf.g"], P["lnf.b"])
     logits = hf @ P["emb"].T
     if record:
@@ -212,6 +216,7 @@ def loss_and_dlogits(logits, targets, _eye_cache={}):
     z = logits - logits.max(-1, keepdims=True)
     el = np.exp(z)
     sm = el / el.sum(-1, keepdims=True)
+    sm += 1e-26              # anti-denormal sebelum operasi lanjutan
     tgt = np.clip(targets, 0, V - 1)
     ll = np.take_along_axis(z, tgt[..., None], -1)[..., 0] \
         - np.log(el.sum(-1, keepdims=True))[..., 0]
@@ -221,10 +226,10 @@ def loss_and_dlogits(logits, targets, _eye_cache={}):
     if key not in _eye_cache:
         _eye_cache[key] = np.eye(V, dtype=logits.dtype)
     dlogits = sm
-    dlogits += 1e-30          # anti-denormal (float kecil bikin CPU lambat 10x+)
     dlogits[m] -= _eye_cache[key][tgt[m]]
     dlogits[~m] = 0
     dlogits /= n
+    dlogits += 1e-30
     return loss, dlogits
 
 
@@ -267,7 +272,7 @@ def backward(P, cfg, cache, dlogits):
         G_[p + "wo"] = rec["o"].reshape(-1, d).T @ dproj.reshape(-1, d)
         do = dproj @ P[p + "wo"].T
         do4 = do.reshape(B, T, H, hd).transpose(0, 2, 1, 3)
-        Pm = rec["Pm"]
+        Pm = rec["Pm"].astype(np.float32) if rec["Pm"].dtype == np.float16 else rec["Pm"]
         dv = Pm.transpose(0, 1, 3, 2) @ do4
         dPm = do4 @ rec["v"].transpose(0, 1, 3, 2)
         tmp = dPm * Pm

@@ -75,8 +75,9 @@ export async function fetchModel(url, onProgress) {
   const W = {};
   let ptr = 0;
   for (const name of meta.order) {
-    const [r, c] = shapes[name];
-    const n = r * c;
+    const sh = shapes[name];
+    // shape bisa [r,c] (2D) atau [n] (1D utk ln/bias) — jangan r*c mentah!
+    const n = sh.length === 2 ? sh[0] * sh[1] : sh[0];
     W[name] = weights.subarray(ptr, ptr + n);
     ptr += n;
   }
@@ -162,15 +163,17 @@ export class Pixanva {
         const ro = i * 3 * d;
         for (let j = 0; j < 3 * d; j++) qkv[j] += hv * wq[ro + j];
       }
-      // simpan K,V ke cache; q di-rope
+      // simpan K,V ke cache; q di-rope (HASIL ROPE PER HEAD DISIMPAN —
+      // bug lama: cuma head-0 ke-rope, head lain baca buffer nol → output monokrom)
       const K = state.K[l], Vc = state.V[l];
       K.set(qkv.subarray(d, 2 * d), T * d);
       Vc.set(qkv.subarray(2 * d, 3 * d), T * d);
-      // per head: rope(q) & rope(k in cache)
+      const qr = state.qr || (state.qr = new Float32Array(d));
       for (let hh2 = 0; hh2 < H; hh2++) {
         const off = hh2 * hd;
         q.set(qkv.subarray(off, off + hd));
         this.rope(q, 0, px, py);
+        qr.set(q.subarray(0, hd), off);
         const kseg = K.subarray(T * d + off, T * d + off + hd);
         this.rope(kseg, 0, px, py);
       }
@@ -184,7 +187,7 @@ export class Pixanva {
         for (let t = 0; t <= T; t++) {
           let s = 0;
           const kr = t * d + off;
-          for (let i = 0; i < hd; i++) s += q[off + i] * K[kr + i];
+          for (let i = 0; i < hd; i++) s += qr[off + i] * K[kr + i];
           s *= scale;
           scores[t] = s;
           if (s > mx) mx = s;
@@ -260,14 +263,17 @@ export class Pixanva {
   }
 }
 
-// sampling: temperature + top-k + repetition penalty ringan
+// sampling: temperature + top-k + repetition penalty (disamakan dgn training/eval.py)
 export function sampleToken(logits, temp, topK, rng, recent, repPenalty) {
   const V = logits.length;
   const adj = new Float32Array(V);
   for (let i = 0; i < V; i++) adj[i] = logits[i] / temp;
   if (recent && repPenalty && repPenalty > 1) {
     const seen = new Set(recent);
-    for (const t of seen) adj[t] -= Math.log(repPenalty) * (1 + 0.15 * recent.filter(r => r === t).length);
+    for (const t of seen) {
+      const c = recent.filter((r) => r === t).length;
+      adj[t] -= 0.12 * (1 + c);
+    }
   }
   // top-k indices
   const idx = Array.from({ length: V }, (_, i) => i);

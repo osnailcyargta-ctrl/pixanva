@@ -137,7 +137,30 @@ body {
   overflow-y: auto;
 }
 .panel-head { font-weight: 650; font-size: 15px; padding: 2px 2px 0; }
-.step { display: flex; flex-direction: column; gap: 8px; }
+
+/* ---------- wizard langkah demi langkah ---------- */
+.wiz-top {
+  display: flex; align-items: center; justify-content: space-between; gap: 8px;
+  padding: 0 2px;
+}
+.wiz-dots { display: flex; gap: 6px; }
+.wdot {
+  width: 22px; height: 5px; border-radius: 999px;
+  background: var(--panel2); border: 1px solid var(--border);
+  transition: background .2s, border-color .2s;
+}
+.wdot.done { background: rgba(108, 123, 255, .35); border-color: var(--accent-dim); }
+.wdot.cur { background: var(--accent); border-color: var(--accent); }
+.step { display: none; flex-direction: column; gap: 8px; }
+.step.active { display: flex; animation: stepIn .18s ease; }
+@keyframes stepIn {
+  from { opacity: 0; transform: translateY(4px); }
+  to { opacity: 1; transform: none; }
+}
+.wiz-nav {
+  display: flex; align-items: center; justify-content: space-between; gap: 8px;
+}
+.wiz-nav .muted { font-size: 11px; }
 .step-title { font-size: 12.5px; font-weight: 600; display: flex; align-items: center; gap: 8px; }
 .step-num {
   width: 18px; height: 18px; border-radius: 6px;

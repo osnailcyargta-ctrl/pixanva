@@ -14,9 +14,10 @@ BASE = os.path.dirname(os.path.abspath(__file__))
 
 MODELS = {
     # nama: (d, L, H, mlp, batch_g16, batch_g32, lr, steps)
-    "light": dict(d=128, L=4, H=4, mlp=512, b16=24, b32=8,  lr=4e-4, steps=800, theta=1000.0),
-    "dark":  dict(d=192, L=6, H=6, mlp=768, b16=12, b32=4,  lr=3e-4, steps=800, theta=1000.0),
-    "heavy": dict(d=256, L=8, H=8, mlp=1024, b16=8, b32=3,  lr=2.6e-4, steps=800, theta=1000.0),
+    # b48: batch saat finetune G=48 — attention (B,H,T,T) harus muat di RAM 3GB
+    "light": dict(d=128, L=4, H=4, mlp=512, b16=24, b32=8,  lr=4e-4, steps=800, theta=1000.0, b48=4),
+    "dark":  dict(d=192, L=6, H=6, mlp=768, b16=12, b32=4,  lr=3e-4, steps=800, theta=1000.0, b48=1),
+    "heavy": dict(d=256, L=8, H=8, mlp=1024, b16=8, b32=2,  lr=2.6e-4, steps=800, theta=1000.0, b48=1),
 }
 
 VAL_SEED = 12345
@@ -141,7 +142,7 @@ def main():
         # pilih bucket: mayoritas G=16, sisanya G=32
         if g48_mode:
             G = 48
-            B = 2
+            B = c.get("b48", 1)
         else:
             r = drng.random()
             p32 = 0.22 if step > total_steps * 0.25 else 0.08

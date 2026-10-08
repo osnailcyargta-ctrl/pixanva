@@ -5,7 +5,7 @@ const $ = (s) => document.querySelector(s);
 const DEFAULTS = {
   light: { temp: 0.95, topk: 32, cfg: 1.3 },
   dark: { temp: 0.90, topk: 24, cfg: 1.6 },
-  heavy: { temp: 0.85, topk: 20, cfg: 1.9 },
+  heavy: { temp: 0.85, topk: 24, cfg: 1.6 },
 };
 
 const state = {
@@ -49,7 +49,8 @@ function onWorkerMsg(e) {
     $("#btnGen").textContent = "Generate";
   } else if (m.type === "token") {
     paintCell(m.i, m.c, currentG);
-    if (m.i % 4 === 0 || m.i === m.total - 1) {
+    if (m.i % 6 === 0 || m.i === m.total - 1) {
+      blitGrid(curSmooth);
       const dt = (performance.now() - genStart) / 1000;
       $("#paintInfo").textContent = `melukis… ${m.i + 1}/${m.total} sel • ${dt.toFixed(1)}s`;
       setStatus("melukis");
@@ -68,33 +69,109 @@ function onWorkerMsg(e) {
 }
 
 // ---------- canvas ----------
+// Kanvas display selalu berukuran output final (out px). Token dilukis dulu ke
+// buffer grid (2px/sel) lalu di-blit — jadi 32/64/96 native 1:1, 128 dari grid 48
+// dihaluskan (bilinear + kuantisasi palet + dither) di akhir.
 let currentG = 32;
-function setupCanvas(G) {
-  currentG = G;
+let outPx = 64;
+let curSmooth = false;
+let gridCv = null, gridCtx = null;
+
+function resolveGrid(model, out) {
+  const m = state.meta.models.find((x) => x.id === model);
+  const g48 = !!(m && m.g48);
+  if (out <= 32) return { G: 16, out: 32, smooth: false };
+  if (out <= 64) return { G: 32, out: 64, smooth: false };
+  if (out <= 96) return g48 ? { G: 48, out: 96, smooth: false } : { G: 32, out: 96, smooth: false };
+  return g48 ? { G: 48, out: 128, smooth: true } : { G: 32, out: 128, smooth: false };
+}
+
+function setupCanvas(G, out, smooth) {
+  currentG = G; outPx = out; curSmooth = !!smooth;
   const cv = $("#canvas");
-  cv.width = G * 2;
-  cv.height = G * 2;
+  cv.width = out; cv.height = out;
   const ctx = cv.getContext("2d");
+  ctx.imageSmoothingEnabled = false;
   ctx.fillStyle = "#0b0d11";
-  ctx.fillRect(0, 0, cv.width, cv.height);
+  ctx.fillRect(0, 0, out, out);
+  gridCv = document.createElement("canvas");
+  gridCv.width = G * 2; gridCv.height = G * 2;
+  gridCtx = gridCv.getContext("2d");
+  gridCtx.fillStyle = "#0b0d11";
+  gridCtx.fillRect(0, 0, G * 2, G * 2);
   $("#stageEmpty").style.display = "none";
 }
 
 function paintCell(i, c, G) {
+  if (!gridCtx) return;
   const r = Math.floor(i / G), col = i % G;
-  const ctx = $("#canvas").getContext("2d");
-  ctx.fillStyle = hex(c);
-  ctx.fillRect(col * 2, r * 2, 2, 2);
+  gridCtx.fillStyle = hex(c);
+  gridCtx.fillRect(col * 2, r * 2, 2, 2);
 }
 
-function paintFull(tokens, G) {
-  setupCanvas(G);
-  const ctx = $("#canvas").getContext("2d");
-  for (let i = 0; i < tokens.length; i++) {
-    const r = Math.floor(i / G), col = i % G;
-    ctx.fillStyle = hex(tokens[i]);
-    ctx.fillRect(col * 2, r * 2, 2, 2);
+function blitGrid(smooth) {
+  if (!gridCv) return;
+  const cv = $("#canvas"), ctx = cv.getContext("2d");
+  ctx.imageSmoothingEnabled = !!smooth;
+  ctx.drawImage(gridCv, 0, 0, cv.width, cv.height);
+}
+
+// --- upscale G48 -> 128: bilinear antar sel + kuantisasi palet + dither bayer ---
+const BAYER = [[0, 8, 2, 10], [12, 4, 14, 6], [3, 11, 1, 9], [15, 7, 13, 5]];
+let PAL_RGB = null;
+function palRGB() {
+  if (PAL_RGB) return PAL_RGB;
+  PAL_RGB = PALETTE.map((h) => [parseInt(h.slice(1, 3), 16), parseInt(h.slice(3, 5), 16), parseInt(h.slice(5, 7), 16)]);
+  return PAL_RGB;
+}
+function nearestPal(r, g, b) {
+  const pal = palRGB();
+  let bi = 0, bd = 1e9;
+  for (let i = 0; i < pal.length; i++) {
+    const dr = r - pal[i][0], dg = g - pal[i][1], db = b - pal[i][2];
+    const d = dr * dr + dg * dg + db * db;
+    if (d < bd) { bd = d; bi = i; }
   }
+  return bi;
+}
+function upscaleBand(tokens, G, out, y0, y1) {
+  const ctx = $("#canvas").getContext("2d");
+  const img = ctx.createImageData(out, y1 - y0);
+  const pal = palRGB();
+  const grid = new Uint8Array(G * G);
+  for (let i = 0; i < tokens.length; i++) grid[i] = tokens[i];
+  for (let y = y0; y < y1; y++) {
+    const fy = Math.min(G - 0.001, Math.max(0, (y + 0.5) * G / out - 0.5));
+    const y0g = Math.floor(fy), ty = fy - y0g, y1g = Math.min(G - 1, y0g + 1);
+    for (let x = 0; x < out; x++) {
+      const fx = Math.min(G - 0.001, Math.max(0, (x + 0.5) * G / out - 0.5));
+      const x0g = Math.floor(fx), tx = fx - x0g, x1g = Math.min(G - 1, x0g + 1);
+      const c00 = pal[grid[y0g * G + x0g]], c10 = pal[grid[y0g * G + x1g]];
+      const c01 = pal[grid[y1g * G + x0g]], c11 = pal[grid[y1g * G + x1g]];
+      const dth = (BAYER[y & 3][x & 3] / 16 - 0.469) * 42;
+      const o = (y - y0) * out + x;
+      const r = c00[0] * (1 - tx) * (1 - ty) + c10[0] * tx * (1 - ty) + c01[0] * (1 - tx) * ty + c11[0] * tx * ty + dth;
+      const g = c00[1] * (1 - tx) * (1 - ty) + c10[1] * tx * (1 - ty) + c01[1] * (1 - tx) * ty + c11[1] * tx * ty + dth;
+      const b = c00[2] * (1 - tx) * (1 - ty) + c10[2] * tx * (1 - ty) + c01[2] * (1 - tx) * ty + c11[2] * tx * ty + dth;
+      const pi = nearestPal(r, g, b);
+      img.data[o * 4] = pal[pi][0]; img.data[o * 4 + 1] = pal[pi][1];
+      img.data[o * 4 + 2] = pal[pi][2]; img.data[o * 4 + 3] = 255;
+    }
+  }
+  ctx.putImageData(img, 0, y0);
+}
+function animateUpscale(tokens, G, out, onDone) {
+  const bands = 8, bh = Math.ceil(out / bands);
+  let b = 0;
+  const step = () => {
+    const y0 = b * bh, y1 = Math.min(out, y0 + bh);
+    upscaleBand(tokens, G, out, y0, y1);
+    b++;
+    setStatus("menambah detail…");
+    if (b < bands) setTimeout(step, 55);
+    else onDone();
+  };
+  step();
 }
 
 // ---------- generate ----------
@@ -114,7 +191,7 @@ function startGen() {
   if (!state.seedLock || !state.seed) state.seed = (Math.random() * 0xffffffff) >>> 0;
   $("#seed").value = state.seed;
 
-  const G = parseInt($("#res").value, 10);
+  const rg = resolveGrid(model, parseInt($("#res").value, 10));
   const d = DEFAULTS[model];
   const opts = {
     model,
@@ -124,14 +201,14 @@ function startGen() {
   };
   const cond = {
     scene: state.scene, color: state.color, mood: state.mood,
-    orn: [...state.orn], G, seed: state.seed,
+    orn: [...state.orn], G: rg.G, seed: state.seed,
   };
   state.lastRun = { cond, opts };
   state.generating = true;
   $("#btnGen").disabled = true;
   $("#btnGen").textContent = "Melukis…";
   genStart = performance.now();
-  setupCanvas(G);
+  setupCanvas(rg.G, rg.out, rg.smooth);
   getWorker().postMessage({ type: "gen", cond, opts });
 }
 
@@ -142,9 +219,17 @@ function finishGen(m) {
   $("#btnDownload").disabled = false;
   $("#btnAgain").disabled = false;
   const dt = (m.ms / 1000).toFixed(1);
-  $("#paintInfo").textContent = `${m.G * m.G} sel • ${dt}s • seed ${state.seed}`;
-  setStatus("selesai");
-  saveGallery(m);
+  const done = () => {
+    $("#paintInfo").textContent = `${outPx}×${outPx}px • ${m.G * m.G} sel • ${dt}s • seed ${state.seed}`;
+    setStatus("selesai");
+    saveGallery(m);
+  };
+  if (curSmooth && m.G * 2 !== outPx) {
+    animateUpscale(m.tokens, m.G, outPx, done);
+  } else {
+    blitGrid(false);
+    done();
+  }
 }
 
 // ---------- galeri ----------
@@ -168,6 +253,7 @@ function saveGallery(m) {
     model: state.model,
     seed: state.seed,
     G: m.G,
+    out: outPx,
     ts: Date.now(),
   });
   while (items.length > 24) items.pop();
@@ -187,17 +273,17 @@ function renderGallery() {
     const img = document.createElement("img");
     img.src = it.img;
     img.title = `${it.prompt}\nmodel: ${it.model} • seed ${it.seed}`;
-    img.onclick = () => { paintFromDataURL(it.img, it.G); $("#paintInfo").textContent = it.prompt; };
+    img.onclick = () => { paintFromDataURL(it.img, it.G, it.out || it.G * 2); $("#paintInfo").textContent = it.prompt; };
     el.appendChild(img);
   }
 }
-function paintFromDataURL(src, G) {
-  setupCanvas(G);
+function paintFromDataURL(src, G, out) {
+  setupCanvas(G, out || G * 2, out === 128 && G === 48);
   const im = new Image();
   im.onload = () => {
     const ctx = $("#canvas").getContext("2d");
     ctx.imageSmoothingEnabled = false;
-    ctx.drawImage(im, 0, 0, G * 2, G * 2);
+    ctx.drawImage(im, 0, 0, G * 2 >= out ? out : out, out);
   };
   im.src = src;
 }
@@ -230,7 +316,8 @@ async function initModels() {
     card.onclick = () => selectModel(m.id);
     list.appendChild(card);
   }
-  selectModel("dark");
+  selectModel("heavy");
+  showStep(1);
 }
 
 function selectModel(id) {
@@ -288,6 +375,10 @@ function initChips() {
   state.color = TAGS.colors[0].id;
   $("#chipsColor").firstChild.classList.add("on");
   for (const o of TAGS.ornaments) chip("orn", $("#chipsOrn"), o, true, 3);
+  // auto-lanjut ke step berikutnya saat single-select dipilih
+  ["#chipsScene", "#chipsColor", "#chipsMood"].forEach((sel) => {
+    $(sel).addEventListener("click", () => wizAdvance());
+  });
 }
 
 // ---------- misc ----------
@@ -316,6 +407,7 @@ function initEvents() {
     state.orn = [];
     $("#chipsOrn").querySelectorAll(".chip").forEach((c) => c.classList.remove("on"));
   };
+  $("#btnBack").onclick = () => showStep(curStep - 1);
   $("#btnDownload").onclick = () => {
     const cv = $("#canvas");
     const a = document.createElement("a");
@@ -348,12 +440,46 @@ function initEvents() {
 
 function startGenWith(cond, opts) {
   if (state.generating) return;
+  const rg = resolveGrid(opts.model, cond.outPx || 64);
+  cond.G = rg.G;
   state.generating = true;
   $("#btnGen").disabled = true;
   $("#btnGen").textContent = "Melukis…";
   genStart = performance.now();
-  setupCanvas(cond.G);
+  setupCanvas(rg.G, rg.out, rg.smooth);
   getWorker().postMessage({ type: "gen", cond, opts });
+}
+
+// ---------- wizard ----------
+const WIZ_STEPS = 4;
+let curStep = 1;
+const WIZ_HINT = {
+  1: "milih subjek pemandangan",
+  2: "milih warna dominan",
+  3: "milih suasana / waktu",
+  4: "hiasan tambahan — bisa dilewati",
+};
+function showStep(n) {
+  curStep = Math.max(1, Math.min(WIZ_STEPS, n));
+  document.querySelectorAll(".step").forEach((s) =>
+    s.classList.toggle("active", +s.dataset.step === curStep));
+  $("#btnBack").disabled = curStep <= 1;
+  $("#wizHint").textContent = WIZ_HINT[curStep];
+  const dots = $("#wizDots");
+  if (dots.children.length !== WIZ_STEPS) {
+    dots.innerHTML = "";
+    for (let i = 0; i < WIZ_STEPS; i++) {
+      const d = document.createElement("span");
+      d.className = "wdot";
+      dots.appendChild(d);
+    }
+  }
+  [...dots.children].forEach((d, i) => {
+    d.className = "wdot" + (i + 1 === curStep ? " cur" : i + 1 < curStep ? " done" : "");
+  });
+}
+function wizAdvance() {
+  if (curStep < WIZ_STEPS) setTimeout(() => showStep(curStep + 1), 230);
 }
 
 // ---------- init ----------
@@ -367,4 +493,5 @@ function startGenWith(cond, opts) {
   } catch (e) {
     setStatus("gagal memuat meta: " + e.message);
   }
+  showStep(1);
 })();

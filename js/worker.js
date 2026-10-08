@@ -83,7 +83,7 @@ async function generate(msg) {
     const color = tok - CO;
     tokens[k] = color;
     recent.push(tok);
-    if (recent.length > 16) recent.shift();
+    if (recent.length > 12) recent.shift();
 
     self.postMessage({ type: "token", i: k, c: color, total });
 

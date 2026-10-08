@@ -9,6 +9,7 @@
    "H": 4,
    "params": 813696,
    "step": 800,
+   "g48": false,
    "val_loss": 0.6800645115109805,
    "file": "models/light.bin",
    "desc": "Cepat & ringan \u2014 paling sederhana"
@@ -21,10 +22,25 @@
    "L": 6,
    "H": 6,
    "params": 2700096,
-   "step": 800,
-   "val_loss": 0.7064049565096253,
+   "step": 830,
+   "g48": true,
+   "val_loss": 0.712774627908905,
    "file": "models/dark.bin",
    "desc": "Seimbang \u2014 kualitas & kecepatan"
+  },
+  {
+   "id": "heavy",
+   "label": "Pixanva Heavy QQ",
+   "version": "qq",
+   "d": 256,
+   "L": 8,
+   "H": 8,
+   "params": 6359296,
+   "step": 1430,
+   "g48": true,
+   "val_loss": 0.7173710792812775,
+   "file": "models/heavy.bin",
+   "desc": "Paling kuat \u2014 paling detail, paling lambat"
   }
  ],
  "palette": [

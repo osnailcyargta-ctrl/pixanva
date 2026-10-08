@@ -97,6 +97,8 @@ def export_meta_all():
             "id": name, "label": label, "version": "1.0" if name != "heavy" else VERSIONS["heavy"],
             "d": cfg["d"], "L": cfg["L"], "H": cfg["H"],
             "params": n, "step": st["step"],
+            # g48: model pernah di-finetune grid 48x48 (utk output 96/128px)
+            "g48": st["step"] > {"light": 800, "dark": 800, "heavy": 1400}[name],
             "val_loss": st["history"]["val"][-1][1] if st["history"]["val"] else None,
             "file": f"models/{name}.bin",
             "desc": {"light": "Cepat & ringan — paling sederhana",

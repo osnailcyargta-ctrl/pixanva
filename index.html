@@ -69,7 +69,12 @@
   <aside class="panel">
     <div class="panel-head">Buat gambar</div>
 
-    <div class="step" data-step="1">
+    <div class="wiz-top">
+      <div class="wiz-dots" id="wizDots"></div>
+      <span class="muted" id="wizHint"></span>
+    </div>
+
+    <div class="step active" data-step="1">
       <div class="step-title"><span class="step-num">1</span> Pemandangan</div>
       <div class="chips" id="chipsScene"></div>
     </div>
@@ -88,6 +93,11 @@
       <div class="step-title"><span class="step-num">4</span> Ornamen <span class="optional">opsional</span></div>
       <div class="chips" id="chipsOrn"></div>
       <button class="btn ghost small skip" id="btnSkipOrn">Lewati ornamen</button>
+    </div>
+
+    <div class="wiz-nav">
+      <button class="btn ghost small" id="btnBack" disabled>← Mundur</button>
+      <span class="muted">pilih otomatis lanjut ke step berikutnya</span>
     </div>
 
     <div class="gen-row">
@@ -137,13 +147,22 @@
       <b>from scratch</b> — tanpa PyTorch, TensorFlow, atau pre-trained model. Arsitektur, attention,
       RoPE 2D, backprop manual, dan optimizer ditulis sendiri (cek folder <code>training/</code> di repo).</p>
       <p>Cara kerja: model autoregressive memprediksi warna palet (96 warna) sel demi sel dari kiri-atas
-      ke kanan-bawah. Tag pilihan lo (pemandangan, warna, suasana, ornamen) di-encode jadi prefix tokens
-      yang dikondisikan lewat attention — makanya hasilnya nyambung sama pilihan lo. Saat training,
-      12% kondisi dibuang (CFG dropout) supaya guidance bisa dipake buat memperkuat pengaruh tag.</p>
+      ke kanan-bawah — lo bisa lihat langsung setiap sel diketok warna saat model "ngitung". Tag pilihan lo
+      (pemandangan, warna, suasana, ornamen) di-encode jadi prefix tokens yang dikondisikan lewat attention,
+      plus classifier-free guidance (12% kondisi dibuang saat training) supaya pengaruh tag bisa diperkuat
+      saat sampling — makanya hasilnya nyambung sama pilihan lo.</p>
       <p>Semua inferensi jalan <b>100% di browser</b> lo — bobot model (fp16) di-fetch lalu dihitung
       pakai JavaScript murni. Gak ada server, gak ada API.</p>
+      <p><b>Resolusi:</b> 32px = grid 16×16, 64px = grid 32×32, 96px = grid 48×48 — semua dilukis
+      native sel-per-sel. 128px = grid 48×48 yang dihaluskan (bilinear antar sel + kuantisasi ulang
+      ke palet + dither bayer) — tahap "menambah detail" ini bisa lo lihat jalan per-band.
+      Pixanva Light cuma dilatih grid 16/32, jadi 96/128px-nya pakai sel lebih besar.</p>
+      <p><b>Versi:</b> Light & Dark pakai penomoran 1.0. Heavy pakai skema <b>QWERTY</b>:
+      dua huruf berurutan sesuai layout keyboard (q→w→e→r→t→y→u→i→o→p→a→s→d→f→g→h→j→k→l→z→x→c→v→b→n→m),
+      dari QQ, QW, QE … sampai QM, lalu naik ke WQ, WW, WE … dan seterusnya. Saat ini:
+      <b>Pixanva Heavy QQ</b> — 6.359.296 parameter.</p>
       <p class="muted">Posisi token: kondisi di (i, 0), sel gambar di (baris, kolom+16) lewat RoPE 2D
-      faktoris — satu model bisa gambar 32px sampai 128px.</p>
+      faktoris — satu model bisa gambar berbagai resolusi grid.</p>
     </div>
   </div>
 </div>

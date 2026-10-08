@@ -17,9 +17,25 @@ bisa lo baca satu-satu di folder [`training/`](training/) dan [`js/`](js/).
 
 | Model | Parameter | Keterangan |
 |---|---|---|
-| Pixanva Light 1.0 | 0.8M | Cepat & ringan, paling sederhana |
-| Pixanva Dark 1.0 | 2.7M | Seimbang |
-| Pixanva Heavy QQ | 6.3M | Paling kuat & paling lambat. Versi heavy ngikutin urutan qwerty: qq → qw → … → qm → wq → … |
+| Pixanva Light 1.0 | 813.696 | Cepat & ringan, paling sederhana (sengaja — ini versi "paling cacat"nya) |
+| Pixanva Dark 1.0 | 2.700.096 | Seimbang, dukung grid 48 (96/128px) |
+| Pixanva Heavy QQ | 6.359.296 | Paling kuat & paling lambat. Versi heavy ngikutin urutan qwerty: qq → qw → … → qm → wq → … |
+
+Training: light 800 step (val 0.68) • dark 800+30 G48 (val 0.71) • heavy 1400+30 G48 (val 0.72).
+
+## Changelog vQQ
+
+- **FIX kritis engine.js**: slice bobot tensor 1-D (LayerNorm/bias) salah hitung (`r*c` dgn
+  `c=undefined` → NaN) — seluruh forward sebelumnya menghasilkan NaN. Ini penyebab hasil
+  blank/monokrom.
+- **FIX kritis engine.js**: RoPE hanya diterapkan ke head pertama; head lain memakai query nol
+  sehingga attention rata-rata tanpa arah. Sekarang semua head di-RoPE.
+- Repetition penalty sampling disamakan dengan `training/eval.py` (window 12, 0.12×(1+count))
+  — menghilangkan output "nyangkut satu warna".
+- Heavy dilatih ulang sampai 1400 step + finetune grid 48×48 (output 96/128px).
+- Seed sekarang acak tiap generate (bisa dikunci), wizard 4 langkah pilih-otomatis-lanjut,
+  resolusi 32/64/96/128 dengan mapping grid 16/32/48, 128px = G48 dihaluskan
+  (bilinear + kuantisasi palet + dither bayer).
 
 ## Arsitektur
 
