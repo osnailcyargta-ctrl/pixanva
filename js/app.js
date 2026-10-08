@@ -3,9 +3,9 @@ import { PALETTE, TAGS, IDS } from "./data.js";
 
 const $ = (s) => document.querySelector(s);
 const DEFAULTS = {
-  light: { temp: 0.95, topk: 32, cfg: 1.0 },
-  dark: { temp: 0.90, topk: 24, cfg: 1.8 },
-  heavy: { temp: 0.85, topk: 20, cfg: 2.2 },
+  light: { temp: 0.95, topk: 32, cfg: 1.3 },
+  dark: { temp: 0.90, topk: 24, cfg: 1.6 },
+  heavy: { temp: 0.85, topk: 20, cfg: 1.9 },
 };
 
 const state = {

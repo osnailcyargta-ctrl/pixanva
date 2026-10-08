@@ -12,6 +12,19 @@
    "val_loss": 0.6800645115109805,
    "file": "models/light.bin",
    "desc": "Cepat & ringan \u2014 paling sederhana"
+  },
+  {
+   "id": "dark",
+   "label": "Pixanva Dark 1.0",
+   "version": "1.0",
+   "d": 192,
+   "L": 6,
+   "H": 6,
+   "params": 2700096,
+   "step": 800,
+   "val_loss": 0.7064049565096253,
+   "file": "models/dark.bin",
+   "desc": "Seimbang \u2014 kualitas & kecepatan"
   }
  ],
  "palette": [
