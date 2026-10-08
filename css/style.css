@@ -235,6 +235,7 @@ input[type="range"] { width: 100%; accent-color: var(--accent); }
   display: flex; align-items: center; justify-content: center; z-index: 50;
   backdrop-filter: blur(4px);
 }
+.modal[hidden] { display: none; }
 .modal-card {
   width: min(620px, 92vw); max-height: 84vh; overflow-y: auto;
   background: var(--panel); border: 1px solid var(--border2); border-radius: 16px;

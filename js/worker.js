@@ -9,7 +9,10 @@ const models = {};
 
 async function ensureLoaded(id, onProgress) {
   if (models[id]) return models[id];
-  const { meta, W } = await fetchModel(`models/${id}.bin`, onProgress);
+  // PENTING: URL relatif di worker di-resolve thd lokasi SCRIPT worker (js/),
+  // bukan halaman — jadi harus naik 1 folder eksplisit.
+  const url = new URL(`../models/${id}.bin`, self.location).href;
+  const { meta, W } = await fetchModel(url, onProgress);
   const model = new Pixanva(meta, W);
   models[id] = { meta, W, model };
   return models[id];
