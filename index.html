@@ -1,0 +1,153 @@
+<!DOCTYPE html>
+<html lang="id">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Pixanva — AI Image Generator</title>
+<link rel="stylesheet" href="css/style.css">
+<link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'><rect width='32' height='32' rx='7' fill='%230e1014'/><rect x='6' y='6' width='9' height='9' rx='2' fill='%236c7bff'/><rect x='17' y='6' width='9' height='9' rx='2' fill='%2339d98a'/><rect x='6' y='17' width='9' height='9' rx='2' fill='%23ffb648'/><rect x='17' y='17' width='9' height='9' rx='2' fill='%23ff5c7a'/></svg>">
+</head>
+<body>
+<div class="app">
+  <!-- ===== SIDEBAR ===== -->
+  <aside class="sidebar">
+    <div class="logo">
+      <div class="logo-mark">
+        <span></span><span></span><span></span><span></span>
+      </div>
+      <div>
+        <div class="logo-name">Pixanva</div>
+        <div class="logo-sub">transformer image generator</div>
+      </div>
+    </div>
+
+    <div class="section-label">Model</div>
+    <div class="model-list" id="modelList"></div>
+
+    <div class="section-label">Galeri <span class="muted" id="galCount"></span></div>
+    <div class="gallery" id="gallery">
+      <div class="gallery-empty">Belum ada karya.<br>Generate yang pertama.</div>
+    </div>
+
+    <div class="sidebar-foot">
+      <button class="btn ghost small" id="btnAbout">Tentang Pixanva</button>
+      <button class="btn ghost small" id="btnClear">Bersihkan galeri</button>
+    </div>
+  </aside>
+
+  <!-- ===== MAIN ===== -->
+  <main class="main">
+    <header class="topbar">
+      <div class="crumb">
+        <span class="badge" id="badgeModel">—</span>
+        <span class="muted" id="badgeInfo"></span>
+      </div>
+      <div class="topbar-right">
+        <span class="muted" id="statusLine">siap</span>
+      </div>
+    </header>
+
+    <div class="stage-wrap">
+      <div class="stage" id="stage">
+        <canvas id="canvas" width="256" height="256"></canvas>
+        <div class="stage-empty" id="stageEmpty">
+          <div class="stage-empty-title">Kanvas masih kosong</div>
+          <div class="stage-empty-sub">Pilih tag di panel kanan, lalu tekan Generate.<br>Pixanva akan melukis sel demi sel di depan mata lo.</div>
+        </div>
+      </div>
+      <div class="stage-meta">
+        <span id="paintInfo"></span>
+        <span class="row-actions">
+          <button class="btn ghost small" id="btnDownload" disabled>Unduh PNG</button>
+          <button class="btn ghost small" id="btnAgain" disabled>Ulangi seed ini</button>
+        </span>
+      </div>
+    </div>
+  </main>
+
+  <!-- ===== PANEL KANAN ===== -->
+  <aside class="panel">
+    <div class="panel-head">Buat gambar</div>
+
+    <div class="step" data-step="1">
+      <div class="step-title"><span class="step-num">1</span> Pemandangan</div>
+      <div class="chips" id="chipsScene"></div>
+    </div>
+
+    <div class="step" data-step="2">
+      <div class="step-title"><span class="step-num">2</span> Warna</div>
+      <div class="chips" id="chipsColor"></div>
+    </div>
+
+    <div class="step" data-step="3">
+      <div class="step-title"><span class="step-num">3</span> Suasana</div>
+      <div class="chips" id="chipsMood"></div>
+    </div>
+
+    <div class="step" data-step="4">
+      <div class="step-title"><span class="step-num">4</span> Ornamen <span class="optional">opsional</span></div>
+      <div class="chips" id="chipsOrn"></div>
+      <button class="btn ghost small skip" id="btnSkipOrn">Lewati ornamen</button>
+    </div>
+
+    <div class="gen-row">
+      <div class="field">
+        <label>Resolusi</label>
+        <select id="res">
+          <option value="32">32 × 32</option>
+          <option value="64" selected>64 × 64</option>
+          <option value="96">96 × 96</option>
+          <option value="128">128 × 128</option>
+        </select>
+      </div>
+      <div class="field grow">
+        <label>Seed</label>
+        <div class="seed-row">
+          <input id="seed" type="text" inputmode="numeric" placeholder="acak">
+          <button class="btn ghost small" id="btnDice" title="Seed acak baru">acak</button>
+          <button class="btn ghost small toggle" id="btnLock" title="Kunci seed">🔒</button>
+        </div>
+      </div>
+    </div>
+
+    <details class="adv">
+      <summary>Pengaturan lanjutan</summary>
+      <div class="field"><label>Suhu <span class="muted" id="tempVal">0.90</span></label>
+        <input type="range" id="temp" min="0.5" max="1.3" step="0.05" value="0.9"></div>
+      <div class="field"><label>Top-k <span class="muted" id="topkVal">24</span></label>
+        <input type="range" id="topk" min="5" max="60" step="1" value="24"></div>
+      <div class="field"><label>Guidance (CFG) <span class="muted" id="cfgVal">1.8</span></label>
+        <input type="range" id="cfg" min="1" max="3" step="0.1" value="1.8"></div>
+    </details>
+
+    <button class="btn primary big" id="btnGen" disabled>Memuat model…</button>
+    <div class="progress" id="loadBar" hidden><div></div></div>
+  </aside>
+</div>
+
+<!-- ===== ABOUT MODAL ===== -->
+<div class="modal" id="aboutModal" hidden>
+  <div class="modal-card">
+    <div class="modal-head">
+      <div class="logo-name">Tentang Pixanva</div>
+      <button class="btn ghost small" id="btnCloseAbout">tutup</button>
+    </div>
+    <div class="modal-body">
+      <p><b>Pixanva</b> adalah image generator berbasis <b>transformer decoder-only</b> yang dibangun
+      <b>from scratch</b> — tanpa PyTorch, TensorFlow, atau pre-trained model. Arsitektur, attention,
+      RoPE 2D, backprop manual, dan optimizer ditulis sendiri (cek folder <code>training/</code> di repo).</p>
+      <p>Cara kerja: model autoregressive memprediksi warna palet (96 warna) sel demi sel dari kiri-atas
+      ke kanan-bawah. Tag pilihan lo (pemandangan, warna, suasana, ornamen) di-encode jadi prefix tokens
+      yang dikondisikan lewat attention — makanya hasilnya nyambung sama pilihan lo. Saat training,
+      12% kondisi dibuang (CFG dropout) supaya guidance bisa dipake buat memperkuat pengaruh tag.</p>
+      <p>Semua inferensi jalan <b>100% di browser</b> lo — bobot model (fp16) di-fetch lalu dihitung
+      pakai JavaScript murni. Gak ada server, gak ada API.</p>
+      <p class="muted">Posisi token: kondisi di (i, 0), sel gambar di (baris, kolom+16) lewat RoPE 2D
+      faktoris — satu model bisa gambar 32px sampai 128px.</p>
+    </div>
+  </div>
+</div>
+
+<script type="module" src="js/app.js"></script>
+</body>
+</html>
