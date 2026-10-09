@@ -488,7 +488,7 @@ body[data-theme="capcut"] .modal-card {
 /* ---------- blur SELURUH gambar sekali (bukan per sel) saat generate ---------- */
 .canvas-box.generating #canvas,
 .canvas-box.generating .var-grid {
-  filter: blur(16px) brightness(.72) saturate(.9);
+  filter: blur(48px) brightness(.72) saturate(.9);
   transform: scale(1.03);
 }
 
@@ -817,10 +817,29 @@ body[data-theme="hacker"] .brush::after { border-color: rgba(38, 255, 125, .4); 
   display: flex; align-items: center; justify-content: center;
   touch-action: none;
   font-family: inherit;
-  transition: box-shadow .15s;
+  will-change: transform;
+  transition: transform .34s cubic-bezier(.3, 1.9, .45, 1), box-shadow .2s;
 }
 .ai-fab:active { cursor: grabbing; box-shadow: 0 12px 32px rgba(0,0,0,.45), 0 0 0 10px rgba(108, 123, 255, .14); }
-.ai-fab span { text-shadow: 0 1px 3px rgba(0, 0, 0, .35); pointer-events: none; }
+/* hit: kenceng dipencet, mulus mantul balik pas dilepas */
+.ai-fab.hit {
+  transform: scale(.82);
+  transition: transform .09s cubic-bezier(.4, 0, .6, 1), box-shadow .09s;
+  box-shadow: 0 6px 18px rgba(0, 0, 0, .4), 0 0 0 4px rgba(108, 123, 255, .18);
+}
+/* denyut ring sekali pas panel kebuka */
+.ai-fab.ping::after {
+  content: ""; position: absolute; inset: -1px;
+  border-radius: 50%; border: 2px solid rgba(108, 123, 255, .55);
+  animation: fabping .6s cubic-bezier(.2, .7, .4, 1) forwards;
+  pointer-events: none;
+}
+@keyframes fabping {
+  from { transform: scale(1); opacity: .9; }
+  to { transform: scale(1.85); opacity: 0; }
+}
+.ai-fab span { text-shadow: 0 1px 3px rgba(0, 0, 0, .35); pointer-events: none; transition: transform .34s cubic-bezier(.3, 1.9, .45, 1); }
+.ai-fab.hit span { transform: scale(.86); transition: transform .09s cubic-bezier(.4, 0, .6, 1); }
 
 .ai-panel {
   position: fixed; z-index: 96;

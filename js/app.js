@@ -30,13 +30,14 @@ const state = {
   painters: null,       // painter per sel variasi
   selVar: -1,
   genfx: true,          // overlay loading blur (persist, default nyala)
+  aiLLM: false,         // LLM chat lokal siap? (fallback: rule-based)
 };
 
 // ---------- worker ----------
 function getWorker() {
   if (!state.worker) {
     // ?v= rilis — bust cache CDN/browser tiap deploy (Pages cache 10 menit)
-    state.worker = new Worker("js/worker.js?v=v15", { type: "module" });
+    state.worker = new Worker("js/worker.js?v=v18", { type: "module" });
     state.worker.onmessage = onWorkerMsg;
     state.worker.onerror = (e) => setStatus("error worker: " + e.message);
   }
@@ -70,6 +71,16 @@ function onWorkerMsg(e) {
     $("#btnGen").disabled = false;
     $("#btnGen").textContent = "Generate";
     state.generating = false;
+    AIState.busy = false;
+  } else if (m.type === "chatready") {
+    state.aiLLM = !!m.ok;
+    if (m.ok) {
+      $("#aiStatus").textContent = `LLM lokal siap (${(m.params / 1e6).toFixed(1)}M) ✦`;
+    }
+  } else if (m.type === "ctok") {
+    aiStream(m.w);
+  } else if (m.type === "cdone") {
+    aiFinish(m.text);
   }
 }
 
@@ -219,8 +230,7 @@ function brushFollow(cellIdx, i, G) {
   brushTo(x / 100, y / 100);
 }
 
-// --- upscale G48 -> 128: bilinear antar sel + kuantisasi palet + dither bayer ---
-const BAYER = [[0, 8, 2, 10], [12, 4, 14, 6], [3, 11, 1, 9], [15, 7, 13, 5]];
+// --- palet RGB (dipakai layer reveal sinematik) ---
 let PAL_RGB = null;
 function palRGB() {
   if (PAL_RGB) return PAL_RGB;
@@ -237,52 +247,76 @@ function nearestPal(r, g, b) {
   }
   return bi;
 }
-function upscaleBand(ctx, tokens, G, out, y0, y1) {
-  const img = ctx.createImageData(out, y1 - y0);
+
+// ---------- reveal sinematik per layer: kasar → detail, kuas nyusul sweep ----------
+// balik lagi sesuai request — pas gambar selese, gambarnya ke-draw ulang layer demi layer
+function layerCanvas(tokens, G, block, out, soft) {
+  const g = Math.max(1, Math.ceil(G / block));
+  const small = document.createElement("canvas");
+  small.width = g; small.height = g;
+  const sc = small.getContext("2d");
+  const img = sc.createImageData(g, g);
   const pal = palRGB();
-  const grid = new Uint8Array(G * G);
-  for (let i = 0; i < tokens.length; i++) grid[i] = tokens[i];
-  for (let y = y0; y < y1; y++) {
-    const fy = Math.min(G - 0.001, Math.max(0, (y + 0.5) * G / out - 0.5));
-    const y0g = Math.floor(fy), ty = fy - y0g, y1g = Math.min(G - 1, y0g + 1);
-    for (let x = 0; x < out; x++) {
-      const fx = Math.min(G - 0.001, Math.max(0, (x + 0.5) * G / out - 0.5));
-      const x0g = Math.floor(fx), tx = fx - x0g, x1g = Math.min(G - 1, x0g + 1);
-      const c00 = pal[grid[y0g * G + x0g]] || pal[0], c10 = pal[grid[y0g * G + x1g]] || pal[0];
-      const c01 = pal[grid[y1g * G + x0g]] || pal[0], c11 = pal[grid[y1g * G + x1g]] || pal[0];
-      const dth = (BAYER[y & 3][x & 3] / 16 - 0.469) * 42;
-      const o = (y - y0) * out + x;
-      const r = c00[0] * (1 - tx) * (1 - ty) + c10[0] * tx * (1 - ty) + c01[0] * (1 - tx) * ty + c11[0] * tx * ty + dth;
-      const g = c00[1] * (1 - tx) * (1 - ty) + c10[1] * tx * (1 - ty) + c01[1] * (1 - tx) * ty + c11[1] * tx * ty + dth;
-      const b = c00[2] * (1 - tx) * (1 - ty) + c10[2] * tx * (1 - ty) + c01[2] * (1 - tx) * ty + c11[2] * tx * ty + dth;
-      const pi = nearestPal(r, g, b);
-      img.data[o * 4] = pal[pi][0]; img.data[o * 4 + 1] = pal[pi][1];
-      img.data[o * 4 + 2] = pal[pi][2]; img.data[o * 4 + 3] = 255;
-    }
+  for (let by = 0; by < g; by++) for (let bx = 0; bx < g; bx++) {
+    let r = 0, gg = 0, bb = 0, n = 0;
+    for (let y = by * block; y < Math.min(G, (by + 1) * block); y++)
+      for (let x = bx * block; x < Math.min(G, (bx + 1) * block); x++) {
+        // token di luar range warna (model kadang nge-sample token tag) → fallback hitam
+        const c = pal[tokens[y * G + x]] || pal[0];
+        r += c[0]; gg += c[1]; bb += c[2]; n++;
+      }
+    const pi = nearestPal(r / n, gg / n, bb / n);
+    const o = (by * g + bx) * 4;
+    img.data[o] = pal[pi][0]; img.data[o + 1] = pal[pi][1];
+    img.data[o + 2] = pal[pi][2]; img.data[o + 3] = 255;
   }
-  ctx.putImageData(img, 0, y0);
+  sc.putImageData(img, 0, 0);
+  const big = document.createElement("canvas");
+  big.width = out; big.height = out;
+  const bc = big.getContext("2d");
+  // 128 (grid 48 → non-integer): smooth biar gak muncul pixel aneh tak rata
+  bc.imageSmoothingEnabled = !!soft;
+  bc.drawImage(small, 0, 0, out, out);
+  return big;
 }
-function animateUpscale(tokens, G, out, onDone) {
-  const ctx = $("#canvas").getContext("2d");
-  // tab gak kelihatan (throttle): langsung full upscale tanpa animasi band
-  if (document.hidden) {
-    upscaleBand(ctx, tokens, G, out, 0, out);
-    onDone();
-    return;
-  }
-  const bands = 8, bh = Math.ceil(out / bands);
-  let b = 0;
-  brushShow();
-  const step = () => {
-    const y0 = b * bh, y1 = Math.min(out, y0 + bh);
-    upscaleBand(ctx, tokens, G, out, y0, y1);
-    b++;
-    brushTo(0.5 + 0.3 * Math.sin(b * 2.4), y1 / out, true);
-    setStatus("menambah detail…");
-    if (b < bands) setTimeout(step, 55);
-    else { brushHide(); onDone(); }
+
+function cinematicReveal(p, tokens, onDone, delayMs = 0, region = { x: 0, y: 0, w: 1, h: 1 }) {
+  const layers = [8, 4, 2, 1];
+  const cvs = layers.map((b) => layerCanvas(tokens, p.G, b, p.out, p.smooth));
+  let li = 0;
+  const start = () => {
+    // tab gak kelihatan → timer di-throttle browser: skip sweep, langsung final
+    if (document.hidden) {
+      p.ctx.imageSmoothingEnabled = !!p.smooth;
+      p.ctx.drawImage(cvs[cvs.length - 1], 0, 0);
+      if (onDone) onDone();
+      return;
+    }
+    brushShow();
+    const stepLayer = () => {
+      if (li >= layers.length) { brushHide(); if (onDone) onDone(); return; }
+      const lc = cvs[li];
+      const dur = 260 + li * 70;
+      const t0 = performance.now();
+      // setTimeout loop (bukan rAF) — tetap jalan walau tab lagi gak fokus
+      const anim = () => {
+        const f = Math.min(1, (performance.now() - t0) / dur);
+        const x = Math.max(1, Math.ceil(f * p.out));
+        p.ctx.drawImage(lc, 0, 0, x, p.out, 0, 0, x, p.out);
+        brushTo(
+          region.x + f * region.w,
+          region.y + region.h * (0.5 + 0.32 * Math.sin(f * Math.PI * 2)),
+          true
+        );
+        if (f < 1) setTimeout(anim, 16);
+        else { li++; stepLayer(); }
+      };
+      anim();
+    };
+    stepLayer();
   };
-  step();
+  if (delayMs > 0) setTimeout(start, delayMs);
+  else start();
 }
 
 // ---------- overlay loading (blur SEKALI di seluruh gambar + spinner + progress) ----------
@@ -379,14 +413,6 @@ function clearRevealNow() {
   vr.hidden = true;
   vr.querySelectorAll("canvas").forEach((c) => c.getContext("2d").clearRect(0, 0, c.width, c.height));
 }
-function clearRevealSoon() {
-  revQ.length = 0;
-  const rv = $("#revealCv");
-  rv.style.opacity = "0";
-  const vr = $("#varReveal");
-  vr.style.opacity = "0";
-  setTimeout(clearRevealNow, 420);
-}
 
 // ---------- generate ----------
 let genStart = 0;
@@ -443,13 +469,15 @@ function finishGen(m) {
     saveOneCanvas($("#canvas"), state.lastRun.cond, state.seed, m.G, outPx);
   };
   if (state.genfx) {
-    // baris udah ke-reveal live selama generate — tinggal angkat blur-nya
-    clearRevealSoon();
-  }
-  if (curSmooth && m.G * 2 !== outPx) {
-    animateUpscale(m.tokens, m.G, outPx, done);
+    // balikin animasi drawing per layer: gambarnya di-draw ulang kasar → detail
+    clearRevealNow();
+    const ctx = $("#canvas").getContext("2d");
+    ctx.fillStyle = "#0b0d11";
+    ctx.fillRect(0, 0, outPx, outPx);
+    cinematicReveal({ G: m.G, out: outPx, smooth: curSmooth, ctx }, m.tokens, done);
   } else {
-    if (!state.genfx) blitGrid(false);
+    // 128 dari grid 48 (non-integer): halus bilinear — tanpa dither biar pixel gak aneh
+    blitGrid(curSmooth);
     done();
   }
 }
@@ -503,7 +531,7 @@ function paintFromDataURL(src, G, out) {
   const im = new Image();
   im.onload = () => {
     const ctx = $("#canvas").getContext("2d");
-    ctx.imageSmoothingEnabled = false;
+    ctx.imageSmoothingEnabled = (out || G * 2) > G * 2; // 128 dari 48: halus, sisanya crisp
     ctx.drawImage(im, 0, 0, G * 2 >= out ? out : out, out);
   };
   im.src = src;
@@ -538,7 +566,7 @@ async function initModels() {
 // 3 kartu model utama (versi terbaru tiap keluarga) — nanggung di sidebar
 function renderMainModels() {
   const box = $("#modelNow");
-  const mains = state.meta.models.filter((m) => m.main);
+  const mains = state.meta.models.filter((m) => m.main && !m.hidden);
   box.innerHTML = '<div class="model-list main3">' + mains.map((m) => `
     <div class="model-card ${m.id === state.model ? "active" : ""}" data-id="${m.id}">
       <div class="mc-name"><span>${m.label}</span>${m.isNew ? ' <span class="tag-new">BARU</span>' : ""}</div>
@@ -560,7 +588,7 @@ function saveMmSort() {
   try { localStorage.setItem("pixanva_mmsort", JSON.stringify(mmSort)); } catch {}
 }
 function sortOthers() {
-  const arr = [...state.meta.models.filter((m) => !m.main)];
+  const arr = [...state.meta.models.filter((m) => !m.main && !m.hidden)];
   if (mmSort.key === "baru") arr.sort((a, b) => (b.ri || 0) - (a.ri || 0));
   else arr.sort((a, b) => (b.params - a.params) || ((b.step || 0) - (a.step || 0)));
   if (mmSort.rev) arr.reverse();
@@ -923,28 +951,39 @@ function finishVarCell(m) {
   const i = q.cur;
   const p = state.painters[i];
   q.results.push({ tokens: m.tokens.slice(), seed: q.conds[i].seed });
-  if (q.rg.smooth && q.rg.G * 2 !== q.rg.out)
-    upscaleBand(p.ctx, m.tokens, q.rg.G, q.rg.out, 0, q.rg.out);
-  else blitPainter(p);
+  if (q.rg.smooth && q.rg.G * 2 !== q.rg.out) {
+    // 128 dari grid 48: halus bilinear, bukan dither (pixel gak aneh)
+    p.ctx.imageSmoothingEnabled = true;
+    p.ctx.drawImage(p.gridCv, 0, 0, q.rg.out, q.rg.out);
+  } else blitPainter(p);
   q.cur++;
   if (q.cur < 4) {
     getWorker().postMessage({ type: "gen", cond: q.conds[q.cur], opts: q.opts });
     return;
   }
-  // semua sel beres — simpan 4-nya ke galeri (reveal-nya udah jalan live per baris)
+  // semua sel beres — reveal sinematik per layer rame-rame (balik kayak dulu)
   state.generating = false;
   state.varQ = null;
   $("#btnGen").disabled = false;
   $("#btnGen").textContent = "Generate";
   hideOverlay();
-  if (state.genfx) clearRevealSoon();
-  else brushHide();
+  clearRevealNow();
   const dt = ((performance.now() - genStart) / 1000).toFixed(1);
   $("#paintInfo").textContent = `4 variasi • ${dt}s — klik salah satu buat jadi utama`;
   setStatus("4 variasi siap");
   const cond0 = { scene: state.scene, color: state.color, mood: state.mood, orn: [...state.orn] };
   q.results.forEach((r, i2) => {
     saveOneCanvas(state.painters[i2].cv, cond0, r.seed, q.rg.G, q.rg.out);
+    if (state.genfx) {
+      const p2 = state.painters[i2];
+      p2.ctx.fillStyle = "#0b0d11";
+      p2.ctx.fillRect(0, 0, p2.out, p2.out);
+      cinematicReveal(
+        { G: q.rg.G, out: q.rg.out, smooth: q.rg.smooth, ctx: p2.ctx }, r.tokens, null,
+        350 + i2 * 190,
+        { x: (i2 % 2) * 0.5, y: Math.floor(i2 / 2) * 0.5, w: 0.5, h: 0.5 }
+      );
+    }
   });
   state.varRes = { results: q.results, conds: q.conds, opts: q.opts, rg: q.rg };
 }
@@ -956,9 +995,8 @@ function selectVar(i) {
   const rg = V.rg;
   setupCanvas(rg.G, rg.out, rg.smooth); // balik ke tampilan tunggal
   for (let k = 0; k < rg.G * rg.G; k++) paintCell(k, r.tokens[k], rg.G);
-  if (rg.smooth && rg.G * 2 !== rg.out)
-    upscaleBand($("#canvas").getContext("2d"), r.tokens, rg.G, rg.out, 0, rg.out);
-  else blitGrid(false);
+  // 128: halus bilinear; 32/64/96: pixel crisp
+  blitGrid(rg.smooth);
   state.seed = r.seed;
   $("#seed").value = r.seed;
   state.lastRun = { cond: { ...V.conds[i] }, opts: V.opts, out: rg.out };
@@ -1000,8 +1038,10 @@ function wizAdvance() {
   if (curStep < WIZ_STEPS) setTimeout(() => showStep(curStep + 1), 230);
 }
 
-// ---------- asisten prompt: fab moveable + chat (otak rule-based dulu, LLM ±7M nyusul) ----------
-const AIState = { last: null, neg: [], busy: false };
+// ---------- asisten prompt: fab moveable + chat ----------
+// Otak: LLM lokal ±6.9M (assistant.bin, dilatih dari nol) kalau ke-load;
+// kalau belum/kegalan → fallback rule-based di bawah.
+const AIState = { last: null, neg: [], busy: false, lastUserText: "", prevUser: "" };
 
 // sinonim → id tag (dari data.js) buat nangkep maksud user dari chat
 const SYN = {
@@ -1064,19 +1104,20 @@ const SYN = {
   },
 };
 const LBL = {};
+const LBLREV = {};
 for (const g of ["scenes", "colors", "moods", "ornaments"])
-  for (const t of TAGS[g]) LBL[t.id] = t.label;
+  for (const t of TAGS[g]) {
+    LBL[t.id] = t.label;
+    LBLREV[t.label.toLowerCase()] = t.id;
+  }
 
 const AI_LINES = {
   ack: ["Oke bro, gw racik dulu 🔎", "Sip, ide bagus — bentar ya 🎨", "Noted! gw susun 3 opsi ✨", "Oke, gw gali ide dulu 🔍"],
   deliver: ["Nih 3 pilihannya 👇", "Nih gw racik 3, tinggal pilih 👇", "3 opsi siap — klik salah satu 👇"],
   reask: ["Oke gw racik ulang 🔄", "Bentar, gw ganti resepnya 🔄", "Oke, versi lain ya 🔄"],
   notopic: [
-    "Bro kurang spesifik nih 😄 tapi santai — gw kasih 3 opsi seru dulu. Biar makin pas, sebut tempat/mood-nya, misal \"pantai senja\".",
-    "Hmm gw tebak-tebak nih 😅 nih 3 opsi acak enak. Next kali sebutin subjeknya ya bro.",
-  ],
-  hello: [
-    "Halo bro! 👋 Gw asisten prompt pixanva. Cerita aja mau gambar apa — misal \"gw mau bikin gunung enaknya gimana?\" — nanti gw kasih 3 set prompt tinggal pilih. Mau nge-blacklist tag? Pencet 🚫 negative prompt.",
+    "Hmm gw gak nangkep maksudnya 😅 — santai, nih gw racik 3 opsi enak dulu.",
+    "Gw belum paham nih 😄 tapi tenang — 3 opsi acak udah gw siapin di bawah.",
   ],
 };
 
@@ -1204,20 +1245,44 @@ function aiAddOpts(sets) {
 }
 function aiReply(text, isReask = false) {
   if (AIState.busy) return;
-  AIState.busy = true;
   const norm = aiNorm(text || "");
   const negs = [...new Set([...aiParseNeg(norm), ...aiFieldNeg()])];
   const topic = aiTopic(norm);
   // "lagi / ganti / versi lain" tanpa topik baru → treat sbg reask
   if (!isReask && AIState.last && !topic.any && /\b(lagi|reask|ganti|versi lain|ulang|other)\b/.test(norm)) {
-    AIState.busy = false;
     return aiReply("", true);
   }
-  const T = isReask ? (AIState.last && AIState.last.any ? AIState.last : topic) : topic;
-  if (!isReask) AIState.last = topic;
+  if (!isReask && text) AIState.lastUserText = text;
+  const cur = isReask
+    ? ((AIState.lastUserText || "kasih ide prompt dong") + " lagi dong versi lain")
+    : (text || "");
+  let curFull = cur;
+  if (negs.length) curFull += " jangan " + negs.map((n) => (LBL[n] || n).toLowerCase()).join(" ");
   AIState.neg = negs;
+  AIState.last = isReask ? AIState.last : topic;
+
+  // ---- jalur LLM lokal (assistant.bin) ----
+  if (state.aiLLM && !state.generating) {
+    AIState.busy = true;
+    aiStreamEl = null;
+    aiStreamBuf = "";
+    $("#aiStatus").textContent = "LLM mikir…";
+    const ctx = AIState.prevUser ? [AIState.prevUser, curFull] : [curFull];
+    AIState.prevUser = curFull;
+    getWorker().postMessage({
+      type: "chat", texts: ctx, temp: 0.82, topk: 24,
+      seed: (Math.random() * 0xffffffff) >>> 0,
+    });
+    return;
+  }
+  if (state.aiLLM && state.generating) {
+    aiAddMsg("Model gambarnya lagi sibuk melukis 😄 nih gw racik manual dulu:");
+  }
+
+  // ---- fallback rule-based ----
+  AIState.busy = true;
+  const T = isReask ? (AIState.last && AIState.last.any ? AIState.last : topic) : topic;
   if (isReask) aiAddMsg(aiR(AI_LINES.reask));
-  else if (!topic.any && !negs.length) aiAddMsg(aiR(AI_LINES.hello));
   else aiAddMsg(aiR(AI_LINES.ack));
   if (negs.length) aiAddMsg("Oh iya — tag " + negs.map((n) => LBL[n] || n).join(", ") + " gw ilangin dari semua opsi 🚫");
   if (!T.any && !isReask) aiAddMsg(aiR(AI_LINES.notopic));
@@ -1229,6 +1294,58 @@ function aiReply(text, isReask = false) {
     $("#aiStatus").textContent = "3 set siap — klik buat pasang";
     AIState.busy = false;
   }, 340);
+}
+
+// streaming token LLM → bubble sementara; pas selesai di-re-render jadi bersih
+let aiStreamEl = null;
+let aiStreamBuf = "";
+function aiStream(w) {
+  if (!aiStreamEl) {
+    aiStreamEl = document.createElement("div");
+    aiStreamEl.className = "ai-msg";
+    $("#aiMsgs").appendChild(aiStreamEl);
+  }
+  aiStreamBuf += (aiStreamBuf ? " " : "") + w;
+  aiStreamEl.textContent = aiStreamBuf;
+  $("#aiMsgs").scrollTop = 1e9;
+}
+function aiFinish(text) {
+  if (aiStreamEl) { aiStreamEl.remove(); aiStreamEl = null; }
+  const buf = (text || aiStreamBuf || "").replace(/\s*sep\s*/g, " ");
+  aiStreamBuf = "";
+  const lines = buf.split(/\n+|(?<=[a-z0-9]) (?=[123][.)])/i);
+  const sets = [], bubbles = [];
+  for (const raw of lines) {
+    const line = raw.trim();
+    if (!line) continue;
+    const mm = line.match(/^([123])[.)]\s*(.+?)\s*=\s*(.+)$/);
+    if (mm) {
+      const labels = mm[3].split("•").map((s) => s.trim()).filter(Boolean);
+      const ids = labels.map((s) => LBLREV[s.toLowerCase()]).filter(Boolean);
+      if (ids.length >= 2) {
+        sets.push({ name: mm[2], labels, ids });
+        continue;
+      }
+    }
+    bubbles.push(line);
+  }
+  for (const b of bubbles) {
+    if (/^(nih|ini 3|3 opsi|tinggal pilih|klik salah)/i.test(b)) continue;
+    aiAddMsg(b);
+  }
+  if (sets.length) {
+    aiAddOpts(sets.map((s) => ({
+      name: s.name, scene: s.ids[0], color: s.ids[1],
+      mood: s.ids[2] || null, orn: s.ids.slice(3),
+    })));
+    $("#aiStatus").textContent = "3 set siap — klik buat pasang";
+  } else {
+    aiAddMsg("(hmm jawaban modelnya rancu — gw racik manual ya 🙏)");
+    const T = AIState.last && AIState.last.any ? AIState.last : aiTopic("");
+    aiAddOpts(aiSets(T, AIState.neg));
+    $("#aiStatus").textContent = "3 set siap — klik buat pasang";
+  }
+  AIState.busy = false;
 }
 function aiSendMsg() {
   const inp = $("#aiInput");
@@ -1288,6 +1405,7 @@ function initAssistant() {
   fab.addEventListener("pointerdown", (e) => {
     drag = { x: e.clientX, y: e.clientY, ox: fab.offsetLeft, oy: fab.offsetTop };
     moved = false;
+    fab.classList.add("hit"); // hit: kenceng dipencet
     try { fab.setPointerCapture(e.pointerId); } catch {}
   });
   fab.addEventListener("pointermove", (e) => {
@@ -1300,14 +1418,21 @@ function initAssistant() {
       fab.style.right = "auto"; fab.style.bottom = "auto";
     }
   });
+  const fabRelease = () => fab.classList.remove("hit"); // lepas → mantul balik mulus
   fab.addEventListener("pointerup", () => {
+    fabRelease();
     if (drag && moved) {
       try { localStorage.setItem("pixanva_fab", JSON.stringify({ x: fab.offsetLeft, y: fab.offsetTop })); } catch {}
     } else if (drag && !moved) {
       toggleAIPanel();
+      // denyut ring sekali pas panel kebuka
+      fab.classList.remove("ping"); void fab.offsetWidth;
+      fab.classList.add("ping");
+      setTimeout(() => fab.classList.remove("ping"), 660);
     }
     drag = null;
   });
+  fab.addEventListener("pointercancel", fabRelease);
   $("#aiClose").onclick = () => toggleAIPanel(false);
   $("#aiSend").onclick = aiSendMsg;
   $("#aiInput").addEventListener("keydown", (e) => { if (e.key === "Enter") aiSendMsg(); });
@@ -1358,6 +1483,8 @@ function initAssistant() {
   try {
     await initModels();
     getWorker().postMessage({ type: "load", model: state.model });
+    // LLM asisten: load di belakang (kalau bin-nya udah ada)
+    getWorker().postMessage({ type: "chatload" });
   } catch (e) {
     setStatus("gagal memuat meta: " + e.message);
   }

@@ -2,6 +2,8 @@
 // Protocol:
 //   {type:'load', model}            -> {type:'progress'|'loaded'}
 //   {type:'gen', cond, opts}        -> {type:'token'}* -> {type:'done'} / {type:'error'}
+//   {type:'chatload'}               -> {type:'chatready', ok}
+//   {type:'chat', texts, opts}      -> {type:'ctok'}* -> {type:'cdone', text} / {type:'error'}
 import { fetchModel, Pixanva, mulberry32, sampleToken } from "./engine.js";
 import { IDS } from "./data.js";
 
@@ -112,8 +114,67 @@ self.onmessage = async (e) => {
       self.postMessage({ type: "loaded", model: msg.model, params: m.meta.n_params, step: m.meta.step });
     } else if (msg.type === "gen") {
       await generate(msg);
+    } else if (msg.type === "chatload") {
+      try {
+        await ensureChat();
+        self.postMessage({ type: "chatready", ok: true, params: chat.meta.n_params });
+      } catch (err) {
+        self.postMessage({ type: "chatready", ok: false, msg: String(err) });
+      }
+    } else if (msg.type === "chat") {
+      await chatGenerate(msg);
     }
   } catch (err) {
     self.postMessage({ type: "error", msg: String((err && err.stack) || err) });
   }
 };
+
+// ===== asisten chat (LLM text dari nol) =====
+let chat = null;
+async function ensureChat() {
+  if (chat) return chat;
+  // URL relatif di worker di-resolve thd js/ — naik 1 folder eksplisit
+  const binURL = new URL("../models/assistant.bin", self.location).href;
+  const { meta, W } = await fetchModel(binURL, () => {});
+  const model = new Pixanva(meta, W);
+  const vres = await fetch(new URL("../models/chat_vocab.json", self.location).href);
+  if (!vres.ok) throw new Error("vocab gak ketemu");
+  const vj = await vres.json();
+  const stoi = {};
+  vj.itos.forEach((w, i) => { if (w) stoi[w] = i; });
+  chat = { meta, model, itos: vj.itos, stoi, S: vj.specials };
+  return chat;
+}
+// tokenizer HARUS mirror 1:1 dgn training/chat_data.py
+function tokText(s) {
+  return s.toLowerCase().match(/[a-z0-9]+|[•=.,:?!-]/g) || [];
+}
+async function chatGenerate(msg) {
+  const { model, itos, stoi, S } = await ensureChat();
+  const t0 = performance.now();
+  // konteks max 2 user msg terakhir, digabung " sep " (sama kayak format training)
+  const texts = (msg.texts || []).slice(-2);
+  const uw = tokText(texts.join(" sep "));
+  const maxNew = 120;
+  const ids = [S.BOS, S.U];
+  for (const w of uw) {
+    if (stoi[w] !== undefined) ids.push(stoi[w]);
+  }
+  ids.push(S.A);
+  const st = model.newState(ids.length + maxNew + 2);
+  let pos = 0;
+  for (const t of ids) { model.step(st, t, pos, 0); pos++; }
+  const rng = mulberry32((msg.seed || 1) >>> 0);
+  const recent = [];
+  const out = [];
+  for (let i = 0; i < maxNew; i++) {
+    const tok = sampleToken(st.logits, msg.temp || 0.82, msg.topk || 24, rng, recent, 1.12);
+    if (tok === S.EOS) break;
+    recent.push(tok);
+    if (recent.length > 24) recent.shift();
+    const w = itos[tok];
+    if (w) { out.push(w); self.postMessage({ type: "ctok", w }); }
+    if (i < maxNew - 1) { model.step(st, tok, pos, 0); pos++; }
+  }
+  self.postMessage({ type: "cdone", text: out.join(" "), ms: performance.now() - t0 });
+}
