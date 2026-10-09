@@ -6,6 +6,7 @@ const DEFAULTS = {
   light: { temp: 0.95, topk: 32, cfg: 1.3 },
   dark: { temp: 0.90, topk: 24, cfg: 1.6 },
   dark12: { temp: 0.90, topk: 24, cfg: 1.7 },
+  dark15: { temp: 0.88, topk: 22, cfg: 1.8 },
   heavy: { temp: 0.85, topk: 24, cfg: 1.6 },
   heavyqw: { temp: 0.85, topk: 24, cfg: 1.7 },
 };
@@ -19,24 +20,30 @@ const state = {
   orn: [],
   seedLock: false,
   seed: null,
-  lastRun: null,        // {cond, opts} utk "ulangi seed ini"
+  lastRun: null,        // {cond, opts, out} utk "ulangi seed ini"
   generating: false,
   worker: null,
   loaded: new Set(),
+  varMode: false,       // variasi ×4 aktif?
+  varQ: null,           // antrean variasi yg lagi jalan
+  varRes: null,         // hasil 4 variasi terakhir (buat klik-pilih)
+  painters: null,       // painter per sel variasi
+  selVar: -1,
+  genfx: true,          // overlay loading blur (persist, default nyala)
 };
 
 // ---------- worker ----------
 function getWorker() {
   if (!state.worker) {
     // ?v= rilis — bust cache CDN/browser tiap deploy (Pages cache 10 menit)
-    state.worker = new Worker("js/worker.js?v=qw1", { type: "module" });
+    state.worker = new Worker("js/worker.js?v=v15", { type: "module" });
     state.worker.onmessage = onWorkerMsg;
     state.worker.onerror = (e) => setStatus("error worker: " + e.message);
   }
   return state.worker;
 }
 
-function hex(c) { return PALETTE[c]; }
+function hex(c) { return PALETTE[c] || PALETTE[0]; }
 
 function onWorkerMsg(e) {
   const m = e.data;
@@ -51,17 +58,12 @@ function onWorkerMsg(e) {
     $("#btnGen").disabled = false;
     $("#btnGen").textContent = "Generate";
   } else if (m.type === "token") {
-    paintCell(m.i, m.c, currentG);
-    if (m.i % 6 === 0 || m.i === m.total - 1) {
-      blitGrid(curSmooth);
-      const dt = (performance.now() - genStart) / 1000;
-      $("#paintInfo").textContent = `melukis… ${m.i + 1}/${m.total} sel • ${dt.toFixed(1)}s`;
-      setStatus("melukis");
-    }
+    onToken(m);
   } else if (m.type === "beat") {
     // keepalive opsional
   } else if (m.type === "done") {
-    finishGen(m);
+    if (state.varQ) finishVarCell(m);
+    else finishGen(m);
   } else if (m.type === "error") {
     console.error(m.msg);
     setStatus("error — cek console");
@@ -103,6 +105,13 @@ function setupCanvas(G, out, smooth) {
   gridCtx.fillStyle = "#0b0d11";
   gridCtx.fillRect(0, 0, G * 2, G * 2);
   $("#stageEmpty").style.display = "none";
+  // balikin tampilan ke mode tunggal + bersihin sisa mode variasi
+  $("#varGrid").hidden = true;
+  $("#varGrid").innerHTML = "";
+  $("#canvas").style.display = "";
+  state.painters = null;
+  brushHide();
+  hideOverlay();
 }
 
 function paintCell(i, c, G) {
@@ -117,6 +126,79 @@ function blitGrid(smooth) {
   const cv = $("#canvas"), ctx = cv.getContext("2d");
   ctx.imageSmoothingEnabled = !!smooth;
   ctx.drawImage(gridCv, 0, 0, cv.width, cv.height);
+}
+
+// routing token: ke kanvas utama / ke sel variasi yg lagi dilukis
+function onToken(m) {
+  const q = state.varQ;
+  if (q && state.painters) {
+    const p = state.painters[Math.min(q.cur, 3)];
+    paintCellP(p, m.i, m.c);
+    if (state.genfx) {
+      $("#genProgFill").style.width =
+        (((q.cur + (m.i + 1) / m.total) / 4) * 100).toFixed(1) + "%";
+    } else if (m.i % 6 === 0 || m.i === m.total - 1) {
+      blitPainter(p);
+      brushFollow(q.cur, m.i, p.G);
+      $("#paintInfo").textContent = `melukis variasi ${q.cur + 1}/4 … ${m.i + 1}/${m.total} sel`;
+      setStatus("melukis");
+    }
+    return;
+  }
+  paintCell(m.i, m.c, currentG);
+  if (state.genfx) {
+    $("#genProgFill").style.width = ((m.i + 1) / m.total * 100).toFixed(1) + "%";
+  } else if (m.i % 6 === 0 || m.i === m.total - 1) {
+    blitGrid(curSmooth);
+    brushFollow(-1, m.i, currentG);
+    const dt = (performance.now() - genStart) / 1000;
+    $("#paintInfo").textContent = `melukis… ${m.i + 1}/${m.total} sel • ${dt.toFixed(1)}s`;
+    setStatus("melukis");
+  }
+}
+
+// painter terpisah per sel variasi (canvas kecil sendiri)
+function makePainter(cv, G, out) {
+  const gc = document.createElement("canvas");
+  gc.width = G * 2; gc.height = G * 2;
+  const gctx = gc.getContext("2d");
+  gctx.fillStyle = "#0b0d11"; gctx.fillRect(0, 0, G * 2, G * 2);
+  const ctx = cv.getContext("2d");
+  ctx.imageSmoothingEnabled = false;
+  ctx.fillStyle = "#0b0d11"; ctx.fillRect(0, 0, out, out);
+  return { cv, ctx, gridCv: gc, gridCtx: gctx, G, out };
+}
+function paintCellP(p, i, c) {
+  const r = Math.floor(i / p.G), col = i % p.G;
+  p.gridCtx.fillStyle = hex(c);
+  p.gridCtx.fillRect(col * 2, r * 2, 2, 2);
+}
+function blitPainter(p) {
+  p.ctx.imageSmoothingEnabled = false;
+  p.ctx.drawImage(p.gridCv, 0, 0, p.out, p.out);
+}
+
+// ---------- kuas virtual: nyusulin posisi lukis ----------
+function brushShow() { $("#brush").hidden = false; }
+function brushHide() { $("#brush").hidden = true; }
+function brushTo(fx, fy, hard) {
+  const b = $("#brush");
+  b.classList.toggle("hard", !!hard);
+  b.style.left = (fx * 100).toFixed(2) + "%";
+  b.style.top = (fy * 100).toFixed(2) + "%";
+}
+// cellIdx: 0..3 = posisi grid 2×2 mode variasi; -1 = kanvas tunggal
+function brushFollow(cellIdx, i, G) {
+  const col = i % G, row = Math.floor(i / G);
+  let x, y;
+  if (cellIdx >= 0) {
+    x = (cellIdx % 2) * 50 + ((col + 1) / G) * 50;
+    y = Math.floor(cellIdx / 2) * 50 + ((row + 1) / G) * 50;
+  } else {
+    x = ((col + 1) / G) * 100;
+    y = ((row + 1) / G) * 100;
+  }
+  brushTo(x / 100, y / 100);
 }
 
 // --- upscale G48 -> 128: bilinear antar sel + kuantisasi palet + dither bayer ---
@@ -137,8 +219,7 @@ function nearestPal(r, g, b) {
   }
   return bi;
 }
-function upscaleBand(tokens, G, out, y0, y1) {
-  const ctx = $("#canvas").getContext("2d");
+function upscaleBand(ctx, tokens, G, out, y0, y1) {
   const img = ctx.createImageData(out, y1 - y0);
   const pal = palRGB();
   const grid = new Uint8Array(G * G);
@@ -149,8 +230,8 @@ function upscaleBand(tokens, G, out, y0, y1) {
     for (let x = 0; x < out; x++) {
       const fx = Math.min(G - 0.001, Math.max(0, (x + 0.5) * G / out - 0.5));
       const x0g = Math.floor(fx), tx = fx - x0g, x1g = Math.min(G - 1, x0g + 1);
-      const c00 = pal[grid[y0g * G + x0g]], c10 = pal[grid[y0g * G + x1g]];
-      const c01 = pal[grid[y1g * G + x0g]], c11 = pal[grid[y1g * G + x1g]];
+      const c00 = pal[grid[y0g * G + x0g]] || pal[0], c10 = pal[grid[y0g * G + x1g]] || pal[0];
+      const c01 = pal[grid[y1g * G + x0g]] || pal[0], c11 = pal[grid[y1g * G + x1g]] || pal[0];
       const dth = (BAYER[y & 3][x & 3] / 16 - 0.469) * 42;
       const o = (y - y0) * out + x;
       const r = c00[0] * (1 - tx) * (1 - ty) + c10[0] * tx * (1 - ty) + c01[0] * (1 - tx) * ty + c11[0] * tx * ty + dth;
@@ -164,17 +245,107 @@ function upscaleBand(tokens, G, out, y0, y1) {
   ctx.putImageData(img, 0, y0);
 }
 function animateUpscale(tokens, G, out, onDone) {
+  const ctx = $("#canvas").getContext("2d");
+  // tab gak kelihatan (throttle): langsung full upscale tanpa animasi band
+  if (document.hidden) {
+    upscaleBand(ctx, tokens, G, out, 0, out);
+    onDone();
+    return;
+  }
   const bands = 8, bh = Math.ceil(out / bands);
   let b = 0;
+  brushShow();
   const step = () => {
     const y0 = b * bh, y1 = Math.min(out, y0 + bh);
-    upscaleBand(tokens, G, out, y0, y1);
+    upscaleBand(ctx, tokens, G, out, y0, y1);
     b++;
+    brushTo(0.5 + 0.3 * Math.sin(b * 2.4), y1 / out, true);
     setStatus("menambah detail…");
     if (b < bands) setTimeout(step, 55);
-    else onDone();
+    else { brushHide(); onDone(); }
   };
   step();
+}
+
+// ---------- reveal sinematik: layer kasar → detail, kuas nyusul sweep ----------
+function layerCanvas(tokens, G, block, out) {
+  const g = Math.max(1, Math.ceil(G / block));
+  const small = document.createElement("canvas");
+  small.width = g; small.height = g;
+  const sc = small.getContext("2d");
+  const img = sc.createImageData(g, g);
+  const pal = palRGB();
+  for (let by = 0; by < g; by++) for (let bx = 0; bx < g; bx++) {
+    let r = 0, gg = 0, bb = 0, n = 0;
+    for (let y = by * block; y < Math.min(G, (by + 1) * block); y++)
+      for (let x = bx * block; x < Math.min(G, (bx + 1) * block); x++) {
+        // token di luar range warna (model kadang nge-sample token tag) → fallback hitam
+        const c = pal[tokens[y * G + x]] || pal[0];
+        r += c[0]; gg += c[1]; bb += c[2]; n++;
+      }
+    const pi = nearestPal(r / n, gg / n, bb / n);
+    const o = (by * g + bx) * 4;
+    img.data[o] = pal[pi][0]; img.data[o + 1] = pal[pi][1];
+    img.data[o + 2] = pal[pi][2]; img.data[o + 3] = 255;
+  }
+  sc.putImageData(img, 0, 0);
+  const big = document.createElement("canvas");
+  big.width = out; big.height = out;
+  const bc = big.getContext("2d");
+  bc.imageSmoothingEnabled = false;
+  bc.drawImage(small, 0, 0, out, out);
+  return big;
+}
+
+function cinematicReveal(p, tokens, onDone, delayMs = 0, region = { x: 0, y: 0, w: 1, h: 1 }) {
+  const layers = [8, 4, 2, 1];
+  const cvs = layers.map((b) => layerCanvas(tokens, p.G, b, p.out));
+  let li = 0;
+  const start = () => {
+    // tab gak kelihatan → timer di-throttle browser: skip sweep, langsung final
+    if (document.hidden) {
+      p.ctx.imageSmoothingEnabled = false;
+      p.ctx.drawImage(cvs[cvs.length - 1], 0, 0);
+      if (onDone) onDone();
+      return;
+    }
+    brushShow();
+    const stepLayer = () => {
+      if (li >= layers.length) { brushHide(); if (onDone) onDone(); return; }
+      const lc = cvs[li];
+      const dur = 260 + li * 70;
+      const t0 = performance.now();
+      // setTimeout loop (bukan rAF) — tetap jalan walau tab lagi gak fokus
+      const anim = () => {
+        const f = Math.min(1, (performance.now() - t0) / dur);
+        const x = Math.max(1, Math.ceil(f * p.out));
+        p.ctx.drawImage(lc, 0, 0, x, p.out, 0, 0, x, p.out);
+        brushTo(
+          region.x + f * region.w,
+          region.y + region.h * (0.5 + 0.32 * Math.sin(f * Math.PI * 2)),
+          true
+        );
+        if (f < 1) setTimeout(anim, 16);
+        else { li++; stepLayer(); }
+      };
+      anim();
+    };
+    stepLayer();
+  };
+  if (delayMs > 0) setTimeout(start, delayMs);
+  else start();
+}
+
+// ---------- overlay loading (blur sel + spinner + progress + generating…) ----------
+function showOverlay() {
+  if (!state.genfx) return;
+  $("#genOverlay").hidden = false;
+  $("#genProgFill").style.width = "0%";
+  $("#canvasBox").classList.add("generating");
+}
+function hideOverlay() {
+  $("#genOverlay").hidden = true;
+  $("#canvasBox").classList.remove("generating");
 }
 
 // ---------- generate ----------
@@ -206,28 +377,41 @@ function startGen() {
     scene: state.scene, color: state.color, mood: state.mood,
     orn: [...state.orn], G: rg.G, seed: state.seed,
   };
-  state.lastRun = { cond, opts };
+  state.lastRun = { cond, opts, out: rg.out };
+  if (state.varMode) { startVarRun(rg, opts); return; }
   state.generating = true;
   $("#btnGen").disabled = true;
   $("#btnGen").textContent = "Melukis…";
   genStart = performance.now();
   setupCanvas(rg.G, rg.out, rg.smooth);
+  showOverlay();
   getWorker().postMessage({ type: "gen", cond, opts });
 }
 
 function finishGen(m) {
+  state.varQ = null;
   state.generating = false;
   $("#btnGen").disabled = false;
   $("#btnGen").textContent = "Generate";
   $("#btnDownload").disabled = false;
   $("#btnAgain").disabled = false;
+  hideOverlay();
   const dt = (m.ms / 1000).toFixed(1);
   const done = () => {
     $("#paintInfo").textContent = `${outPx}×${outPx}px • ${m.G * m.G} sel • ${dt}s • seed ${state.seed}`;
     setStatus("selesai");
-    saveGallery(m);
+    saveOneCanvas($("#canvas"), state.lastRun.cond, state.seed, m.G, outPx);
   };
-  if (curSmooth && m.G * 2 !== outPx) {
+  if (state.genfx) {
+    // bersihin dulu — hasil jangan kelihatan sebelum reveal sinematik
+    const ctx = $("#canvas").getContext("2d");
+    ctx.fillStyle = "#0b0d11";
+    ctx.fillRect(0, 0, outPx, outPx);
+    cinematicReveal({ cv: $("#canvas"), ctx, G: m.G, out: outPx }, m.tokens, () => {
+      if (curSmooth && m.G * 2 !== outPx) animateUpscale(m.tokens, m.G, outPx, done);
+      else done();
+    });
+  } else if (curSmooth && m.G * 2 !== outPx) {
     animateUpscale(m.tokens, m.G, outPx, done);
   } else {
     blitGrid(false);
@@ -241,9 +425,8 @@ function loadGallery() {
   try { return JSON.parse(localStorage.getItem(galKey()) || "[]"); }
   catch { return []; }
 }
-function saveGallery(m) {
+function saveOneCanvas(cv, cond, seed, G, out) {
   const items = loadGallery();
-  const cv = $("#canvas");
   const up = document.createElement("canvas");
   const scale = Math.max(2, 256 / cv.width);
   up.width = cv.width * scale; up.height = cv.height * scale;
@@ -252,11 +435,11 @@ function saveGallery(m) {
   uc.drawImage(cv, 0, 0, up.width, up.height);
   items.unshift({
     img: up.toDataURL("image/png"),
-    prompt: promptText(state.lastRun.cond),
+    prompt: promptText(cond),
     model: state.model,
-    seed: state.seed,
-    G: m.G,
-    out: outPx,
+    seed,
+    G,
+    out,
     ts: Date.now(),
   });
   while (items.length > 24) items.pop();
@@ -312,27 +495,55 @@ function fmtMeta(m) {
 async function initModels() {
   const res = await fetch("models/meta.json");
   state.meta = await res.json();
-  selectModel("heavyqw"); // default: rilis terbaru (sekaligus render kartu + popup)
+  const mains = state.meta.models.filter((m) => m.main).sort((a, b) => (b.ri || 0) - (a.ri || 0));
+  selectModel(mains.length ? mains[0].id : "heavyqw"); // default: model utama terbaru
   showStep(1);
 }
 
-// kartu model aktif di sidebar
-function renderModelNow() {
-  const m = modelById(state.model);
-  if (!m) return;
-  $("#modelNow").innerHTML = `
-    <div class="model-card active">
-      <div class="mc-name">${m.label}${m.isNew ? ' <span class="tag-new">BARU</span>' : ""}</div>
+// 3 kartu model utama (versi terbaru tiap keluarga) — nanggung di sidebar
+function renderMainModels() {
+  const box = $("#modelNow");
+  const mains = state.meta.models.filter((m) => m.main);
+  box.innerHTML = '<div class="model-list main3">' + mains.map((m) => `
+    <div class="model-card ${m.id === state.model ? "active" : ""}" data-id="${m.id}">
+      <div class="mc-name"><span>${m.label}</span>${m.isNew ? ' <span class="tag-new">BARU</span>' : ""}</div>
       <div class="mc-desc">${m.desc}</div>
-      <div class="mc-meta">${fmtMeta(m)} • step ${m.step}</div>
-    </div>`;
+      <div class="mc-meta">${fmtMeta(m)}${m.released ? ` • rilis ${m.released}` : ""}</div>
+    </div>`).join("") + "</div>";
+  box.querySelectorAll(".model-card").forEach((c) => (c.onclick = () => selectModel(c.dataset.id)));
 }
 
-// isi popup More models — terbaru dulu, model lama tetap bisa dipilih
+// sort popup More models — terbaru / terpintar + reverse (persist di localStorage)
+const mmSort = { key: "baru", rev: false };
+function loadMmSort() {
+  try {
+    const s = JSON.parse(localStorage.getItem("pixanva_mmsort") || "null");
+    if (s) { mmSort.key = s.key === "pintar" ? "pintar" : "baru"; mmSort.rev = !!s.rev; }
+  } catch {}
+}
+function saveMmSort() {
+  try { localStorage.setItem("pixanva_mmsort", JSON.stringify(mmSort)); } catch {}
+}
+function sortOthers() {
+  const arr = [...state.meta.models.filter((m) => !m.main)];
+  if (mmSort.key === "baru") arr.sort((a, b) => (b.ri || 0) - (a.ri || 0));
+  else arr.sort((a, b) => (b.params - a.params) || ((b.step || 0) - (a.step || 0)));
+  if (mmSort.rev) arr.reverse();
+  return arr;
+}
+
+// isi popup More models — cuma model selain 3 utama, sesuai sort
 function renderModelsModal() {
   const list = $("#mmList");
+  const sorted = sortOthers();
+  $("#mmSub").textContent = sorted.length
+    ? `${sorted.length} model lama & versi sebelumnya — tetap bisa dipilih`
+    : "semua model udah nanggung di layar utama";
+  $("#sortNew").classList.toggle("on", mmSort.key === "baru");
+  $("#sortSmart").classList.toggle("on", mmSort.key === "pintar");
+  $("#btnRevSort").classList.toggle("on", mmSort.rev);
   list.innerHTML = "";
-  for (const m of [...state.meta.models].reverse()) {
+  for (const m of sorted) {
     const card = document.createElement("div");
     card.className = "mm-item" + (m.id === state.model ? " active" : "");
     card.innerHTML = `
@@ -342,7 +553,7 @@ function renderModelsModal() {
         ${m.id === state.model ? '<span class="tag-cur">aktif</span>' : ""}
       </div>
       <div class="mc-desc">${m.desc}</div>
-      <div class="mc-meta">${fmtMeta(m)} • step ${m.step}</div>`;
+      <div class="mc-meta">${fmtMeta(m)} • step ${m.step}${m.released ? ` • rilis ${m.released}` : ""}</div>`;
     card.onclick = () => {
       selectModel(m.id);
       $("#modelsModal").hidden = true;
@@ -360,7 +571,7 @@ function selectModel(id) {
   $("#temp").value = d.temp; $("#tempVal").textContent = d.temp;
   $("#topk").value = d.topk; $("#topkVal").textContent = d.topk;
   $("#cfg").value = d.cfg; $("#cfgVal").textContent = d.cfg;
-  renderModelNow();
+  renderMainModels();
   renderModelsModal();
   state.loaded.delete(id); // force reload meta utk model ini kalau berganti
   if (state.worker) {
@@ -372,6 +583,7 @@ function selectModel(id) {
 function chip(group, el, item, multi, max) {
   const b = document.createElement("button");
   b.className = "chip";
+  b.dataset.id = item.id;
   if (group === "colors") {
     const idx = IDS.COLOR_IDS[item.id] - IDS.COLOR_OFFSET;
     const picks = [idx, (idx + 31) % 96, (idx + 63) % 96];
@@ -458,6 +670,32 @@ function initEvents() {
     state.generating = false;
     startGenWith(state.lastRun.cond, state.lastRun.opts);
   };
+  // ----- prompt dadu: acak semua tag + langsung generate -----
+  $("#btnDadu").onclick = () => {
+    if (state.generating) return;
+    const R = (a) => a[Math.floor(Math.random() * a.length)];
+    state.scene = R(TAGS.scenes).id;
+    state.color = R(TAGS.colors).id;
+    state.mood = Math.random() < 0.85 ? R(TAGS.moods).id : null;
+    const pool = [...TAGS.ornaments];
+    state.orn = [];
+    const n = Math.random() < 0.5 ? 0 : Math.random() < 0.72 ? 1 : 2;
+    for (let i = 0; i < n; i++)
+      state.orn.push(pool.splice(Math.floor(Math.random() * pool.length), 1)[0].id);
+    setChipsOn("#chipsScene", state.scene);
+    setChipsOn("#chipsColor", state.color);
+    setChipsOn("#chipsMood", state.mood);
+    setChipsOn("#chipsOrn", state.orn);
+    showStep(1);
+    setStatus("dadu: " + promptText({ scene: state.scene, color: state.color, mood: state.mood, orn: state.orn }));
+    startGen();
+  };
+  // ----- toggle variasi ×4 -----
+  $("#btnVar").onclick = () => {
+    state.varMode = !state.varMode;
+    $("#btnVar").classList.toggle("on", state.varMode);
+    setStatus(state.varMode ? "mode variasi ×4 nyala — 1 prompt jadi 4 gambar" : "mode variasi mati");
+  };
   $("#temp").oninput = () => $("#tempVal").textContent = $("#temp").value;
   $("#topk").oninput = () => $("#topkVal").textContent = $("#topk").value;
   $("#cfg").oninput = () => $("#cfgVal").textContent = $("#cfg").value;
@@ -465,6 +703,10 @@ function initEvents() {
   $("#btnMoreModels").onclick = () => $("#modelsModal").hidden = false;
   $("#btnCloseModels").onclick = () => $("#modelsModal").hidden = true;
   $("#modelsModal").onclick = (e) => { if (e.target === $("#modelsModal")) $("#modelsModal").hidden = true; };
+  // ----- sort popup more models: terbaru / terpintar + reverse -----
+  $("#sortNew").onclick = () => { mmSort.key = "baru"; saveMmSort(); renderModelsModal(); };
+  $("#sortSmart").onclick = () => { mmSort.key = "pintar"; saveMmSort(); renderModelsModal(); };
+  $("#btnRevSort").onclick = () => { mmSort.rev = !mmSort.rev; saveMmSort(); renderModelsModal(); };
 
   const openSettings = () => { $("#settingsModal").hidden = false; };
   $("#btnSettings").onclick = openSettings;
@@ -497,6 +739,9 @@ function initEvents() {
   $("#swCapcut").onclick = () =>
     applyCapcut(!document.body.classList.contains("capcut"));
 
+  // ----- toggle layar loading blur (default nyala, persist) -----
+  $("#swGenfx").onclick = () => applyGenfx(!state.genfx);
+
   // ----- bottom nav (mode capcut) -----
   const setCapTab = (t) => {
     $("#capBtnBuat").classList.toggle("on", t === "buat");
@@ -527,16 +772,135 @@ function applyCapcut(on) {
   try { localStorage.setItem("pixanva_capcut", on ? "1" : "0"); } catch {}
 }
 
+function applyGenfx(on) {
+  state.genfx = !!on;
+  $("#swGenfx").classList.toggle("on", state.genfx);
+  $("#swGenfx").setAttribute("aria-pressed", state.genfx ? "true" : "false");
+  if (!state.genfx) hideOverlay();
+  try { localStorage.setItem("pixanva_genfx", state.genfx ? "1" : "0"); } catch {}
+}
+
+// sync tampilan chip wizard dari state (dipakai dadu)
+function setChipsOn(sel, ids) {
+  const want = Array.isArray(ids) ? ids : ids == null ? [] : [ids];
+  $(sel).querySelectorAll(".chip").forEach((c) =>
+    c.classList.toggle("on", want.includes(c.dataset.id)));
+}
+
 function startGenWith(cond, opts) {
   if (state.generating) return;
-  const rg = resolveGrid(opts.model, cond.outPx || 64);
+  const out = (state.lastRun && state.lastRun.out) || cond.outPx || 64;
+  const rg = resolveGrid(opts.model, out);
   cond.G = rg.G;
+  state.varQ = null;
   state.generating = true;
   $("#btnGen").disabled = true;
   $("#btnGen").textContent = "Melukis…";
   genStart = performance.now();
   setupCanvas(rg.G, rg.out, rg.smooth);
+  showOverlay();
   getWorker().postMessage({ type: "gen", cond, opts });
+}
+
+// ---------- variasi ×4: satu prompt, 4 seed, grid 2×2 ----------
+function startVarRun(rg, opts) {
+  const seeds = [0, 1, 2, 3].map((i) =>
+    state.seedLock && state.seed
+      ? (state.seed + i * 101) >>> 0
+      : (Math.random() * 0xffffffff) >>> 0);
+  state.seed = seeds[0];
+  $("#seed").value = seeds[0];
+  const conds = seeds.map((s) => ({
+    scene: state.scene, color: state.color, mood: state.mood,
+    orn: [...state.orn], G: rg.G, seed: s,
+  }));
+  state.varQ = { conds, opts, results: [], cur: 0, rg };
+  currentG = rg.G; outPx = rg.out; curSmooth = rg.smooth;
+  const vg = $("#varGrid");
+  vg.innerHTML = ""; vg.hidden = false;
+  $("#canvas").style.display = "none";
+  $("#stageEmpty").style.display = "none";
+  state.painters = conds.map((c, i) => {
+    const cell = document.createElement("div");
+    cell.className = "var-cell";
+    cell.dataset.i = i;
+    cell.title = "klik buat jadikan variasi utama";
+    const cv = document.createElement("canvas");
+    cv.width = rg.out; cv.height = rg.out;
+    const tag = document.createElement("span");
+    tag.className = "vc-tag";
+    tag.textContent = "#" + (i + 1);
+    cell.appendChild(cv);
+    cell.appendChild(tag);
+    vg.appendChild(cell);
+    return makePainter(cv, rg.G, rg.out);
+  });
+  [...vg.children].forEach((c, i) => (c.onclick = () => selectVar(i)));
+  state.selVar = -1;
+  $("#btnDownload").disabled = true;
+  $("#btnAgain").disabled = true;
+  state.generating = true;
+  $("#btnGen").disabled = true;
+  $("#btnGen").textContent = "Melukis ×4…";
+  genStart = performance.now();
+  showOverlay();
+  getWorker().postMessage({ type: "gen", cond: conds[0], opts });
+}
+
+function finishVarCell(m) {
+  const q = state.varQ;
+  if (!q) return;
+  const i = q.cur;
+  const p = state.painters[i];
+  q.results.push({ tokens: m.tokens.slice(), seed: q.conds[i].seed });
+  if (q.rg.smooth && q.rg.G * 2 !== q.rg.out)
+    upscaleBand(p.ctx, m.tokens, q.rg.G, q.rg.out, 0, q.rg.out);
+  else blitPainter(p);
+  q.cur++;
+  if (q.cur < 4) {
+    getWorker().postMessage({ type: "gen", cond: q.conds[q.cur], opts: q.opts });
+    return;
+  }
+  // semua sel beres — simpan 4-nya ke galeri + reveal sinematik rame-rame
+  state.generating = false;
+  state.varQ = null;
+  $("#btnGen").disabled = false;
+  $("#btnGen").textContent = "Generate";
+  hideOverlay();
+  const dt = ((performance.now() - genStart) / 1000).toFixed(1);
+  $("#paintInfo").textContent = `4 variasi • ${dt}s — klik salah satu buat jadi utama`;
+  setStatus("4 variasi siap");
+  const cond0 = { scene: state.scene, color: state.color, mood: state.mood, orn: [...state.orn] };
+  q.results.forEach((r, i2) => {
+    saveOneCanvas(state.painters[i2].cv, cond0, r.seed, q.rg.G, q.rg.out);
+    if (state.genfx) {
+      const p2 = state.painters[i2];
+      p2.ctx.fillStyle = "#0b0d11";
+      p2.ctx.fillRect(0, 0, p2.out, p2.out);
+      cinematicReveal(p2, r.tokens, null, 350 + i2 * 190,
+        { x: (i2 % 2) * 0.5, y: Math.floor(i2 / 2) * 0.5, w: 0.5, h: 0.5 });
+    }
+  });
+  state.varRes = { results: q.results, conds: q.conds, opts: q.opts, rg: q.rg };
+}
+
+function selectVar(i) {
+  const V = state.varRes;
+  if (!V || !V.results[i] || state.generating) return;
+  const r = V.results[i];
+  const rg = V.rg;
+  setupCanvas(rg.G, rg.out, rg.smooth); // balik ke tampilan tunggal
+  for (let k = 0; k < rg.G * rg.G; k++) paintCell(k, r.tokens[k], rg.G);
+  if (rg.smooth && rg.G * 2 !== rg.out)
+    upscaleBand($("#canvas").getContext("2d"), r.tokens, rg.G, rg.out, 0, rg.out);
+  else blitGrid(false);
+  state.seed = r.seed;
+  $("#seed").value = r.seed;
+  state.lastRun = { cond: { ...V.conds[i] }, opts: V.opts, out: rg.out };
+  $("#btnDownload").disabled = false;
+  $("#btnAgain").disabled = false;
+  $("#paintInfo").textContent = `${rg.out}×${rg.out}px • variasi #${i + 1} • seed ${r.seed}`;
+  setStatus(`variasi #${i + 1} jadi utama`);
 }
 
 // ---------- wizard ----------
@@ -580,6 +944,11 @@ function wizAdvance() {
   let cc = false;
   try { cc = localStorage.getItem("pixanva_capcut") === "1"; } catch {}
   applyCapcut(cc);
+  // layar loading blur: default NYALA kecuali user mati-in sebelumnya
+  let fx = true;
+  try { fx = localStorage.getItem("pixanva_genfx") !== "0"; } catch {}
+  applyGenfx(fx);
+  loadMmSort();
   try {
     await initModels();
     getWorker().postMessage({ type: "load", model: state.model });

@@ -59,10 +59,19 @@
 
     <div class="stage-wrap">
       <div class="stage" id="stage">
-        <canvas id="canvas" width="256" height="256"></canvas>
-        <div class="stage-empty" id="stageEmpty">
-          <div class="stage-empty-title">Kanvas masih kosong</div>
-          <div class="stage-empty-sub">Pilih tag di panel bawah/kanan, lalu tekan Generate.<br>Pixanva akan melukis sel demi sel di depan mata lo.</div>
+        <div class="canvas-box" id="canvasBox">
+          <canvas id="canvas" width="256" height="256"></canvas>
+          <div class="var-grid" id="varGrid" hidden></div>
+          <div class="gen-overlay" id="genOverlay" hidden>
+            <div class="gen-spin"></div>
+            <div class="progress gen-prog"><div id="genProgFill"></div></div>
+            <div class="gen-label">generating<span class="gdot"><i></i><i></i><i></i></span></div>
+          </div>
+          <div class="brush" id="brush" hidden><i></i></div>
+          <div class="stage-empty" id="stageEmpty">
+            <div class="stage-empty-title">Kanvas masih kosong</div>
+            <div class="stage-empty-sub">Pilih tag di panel bawah/kanan, lalu tekan Generate.<br>Pixanva akan melukis sel demi sel di depan mata lo.</div>
+          </div>
         </div>
       </div>
       <div class="stage-meta">
@@ -108,6 +117,11 @@
     <div class="wiz-nav">
       <button class="btn ghost small" id="btnBack" disabled>← Mundur</button>
       <span class="muted">pilih otomatis lanjut ke step berikutnya</span>
+    </div>
+
+    <div class="quick-row">
+      <button class="btn ghost small" id="btnDadu" title="Isi prompt acak + langsung generate">🎲 Prompt dadu</button>
+      <button class="btn ghost small toggle" id="btnVar" title="Satu prompt → 4 variasi sekaligus">Variasi ×4</button>
     </div>
 
     <div class="gen-row">
@@ -171,6 +185,16 @@
       </div>
       <button class="btn ghost small" id="btnCloseModels">tutup</button>
     </div>
+    <div class="mm-sortbar">
+      <span class="muted" id="mmSub">model lama &amp; versi sebelumnya</span>
+      <div class="mm-sort">
+        <button class="chip sortchip on" id="sortNew">Terbaru</button>
+        <button class="chip sortchip" id="sortSmart">Terpintar</button>
+        <button class="iconbtn mm-rev" id="btnRevSort" title="Balik urutan">
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M7 3v18"/><path d="M3 7l4-4 4 4"/><path d="M17 21V3"/><path d="M13 17l4 4 4-4"/></svg>
+        </button>
+      </div>
+    </div>
     <div class="modal-body mm-list" id="mmList"></div>
   </div>
 </div>
@@ -192,6 +216,15 @@
             panel &amp; galeri geser dari bawah. Default mati.</small>
           </div>
           <button class="switch" id="swCapcut" aria-pressed="false" title="Toggle menu CapCut"><i></i></button>
+        </div>
+        <div class="set-row">
+          <div class="set-info">
+            <b>Layar loading saat generate</b>
+            <small>Sel gambar di-blur + lingkaran loading + progress bar + tulisan
+            "generating…" selama model ngitung, lalu gambar di-reveal sinematik per-layer.
+            Matikan kalau mau lihat pelukisan langsung sel-per-sel.</small>
+          </div>
+          <button class="switch" id="swGenfx" aria-pressed="true" title="Toggle layar loading"><i></i></button>
         </div>
       </div>
       <div class="set-group">
@@ -240,17 +273,24 @@
       native sel-per-sel. 128px = grid 48×48 yang dihaluskan (bilinear antar sel + kuantisasi ulang
       ke palet + dither bayer) — tahap "menambah detail" ini bisa lo lihat jalan per-band.
       Pixanva Light cuma dilatih grid 16/32, jadi 96/128px-nya pakai sel lebih besar.</p>
-      <p><b>Model &amp; versi:</b> Light &amp; Dark pakai penomoran desimal (naik 0.2 = update menengah).
+      <p><b>Model &amp; versi:</b> Light &amp; Dark pakai penomoran desimal — naik 0.2 = update menengah
+      (latihan lebih lama), naik 0.3 = update besar (parameter beneran ditambah:
+      Dark 1.5 naik dari 2.7M jadi 4.9M parameter, 6 → 8 lapis attention).
       Heavy pakai skema <b>QWERTY</b>: dua huruf berurutan sesuai layout keyboard
-      (q→w→e→r→t→y→u→i→o→p→a→s→d→f→g→h→j→k→l→z→x→c→v→b→n→m) — setiap naik satu huruf = <b>+0.2 versi</b>:
-      QQ, lalu QW (+0.2), QE (+0.4) … sampai QM, lanjut WQ, WW, WE … dan seterusnya.
-      Model lama gak pernah dihapus — semua versi bisa dipilih lewat <b>More models</b>.</p>
+      (q→w→e→r→t→y→u→i→o→p→a→s→d→f→g→h→j→k→l→z→x→c→v→b→n→m) — setiap naik satu huruf dihitung
+      <b>+0.2 versi</b>: QQ, lalu QW, QE … sampai QM, lanjut WQ, WW, WE … dan seterusnya.
+      Tiga model utama (versi terbaru tiap keluarga) nanggung di layar depan;
+      semua versi lama tetap bisa dipilih lewat <b>More models</b> — bisa di-sort
+      <i>terbaru</i> / <i>terpintar</i> dan dibalik urutannya.</p>
+      <p><b>Fitur:</b> variasi ×4 (satu prompt dilukis jadi 4 kandidat beda seed, tinggal pilih),
+      prompt dadu 🎲 buat yang males mikir, layar loading blur + progress, dan reveal sinematik
+      per-layer pakai kuas virtual.</p>
       <p class="muted">Posisi token: kondisi di (i, 0), sel gambar di (baris, kolom+16) lewat RoPE 2D
       faktoris — satu model bisa gambar berbagai resolusi grid.</p>
     </div>
   </div>
 </div>
 
-<script type="module" src="js/app.js?v=qw1"></script>
+<script type="module" src="js/app.js?v=v15b"></script>
 </body>
 </html>

@@ -17,22 +17,34 @@ VERSIONS = {
     "light": "1.0",
     "dark": "1.0",
     "dark12": "1.2",
+    "dark15": "1.5",
     "heavy": "qq",
     "heavyqw": "qw",
 }
 
-# urutan meta.json = lama -> baru (popup More models nampilin kebalikannya)
+# urutan + tanggal rilis — dipakai sort "Terbaru" di popup More models
+RELEASES = {
+    "light": (1, "2026-10-07"), "dark": (2, "2026-10-07"), "heavy": (3, "2026-10-07"),
+    "dark12": (4, "2026-10-09"), "heavyqw": (5, "2026-10-09"), "dark15": (6, "2026-10-09"),
+}
+
+# 3 kartu utama di layar depan = versi terbaru tiap keluarga; sisanya masuk popup
+MAIN_MODELS = {"light", "heavyqw", "dark15"}
+
+# urutan meta.json = lama -> baru (ri = release index)
 MODEL_INFO = [
     dict(id="light",  label="Pixanva Light 1.0",  desc="Cepat & ringan — paling sederhana",
          g48_thr=800),
     dict(id="dark",   label="Pixanva Dark 1.0",   desc="Seimbang — kualitas & kecepatan",
          g48_thr=800),
-    dict(id="dark12", label="Pixanva Dark 1.2",   desc="Versi 1.2 — dilatih lebih lama, 96/128px makin rapi, lebih taat tag",
-         g48_thr=1230, new=True),
-    dict(id="heavy",  label="Pixanva Heavy QQ",   desc="Paling kuat — paling detail, paling lambat",
+    dict(id="heavy",  label="Pixanva Heavy QQ",   desc="Paling kuat generasi awal — paling detail, paling lambat",
          g48_thr=1400),
+    dict(id="dark12", label="Pixanva Dark 1.2",   desc="Versi 1.2 — dilatih lebih lama, 96/128px makin rapi, lebih taat tag",
+         g48_thr=1230),
     dict(id="heavyqw", label="Pixanva Heavy QW",  desc="Update 0.2 dari QQ — makin taat tag & makin detail",
-         g48_thr=1880, new=True),
+         g48_thr=1880),
+    dict(id="dark15", label="Pixanva Dark 1.5",   desc="Update 0.3 — parameter naik beneran (2.7M → 4.9M, 6 → 8 lapis)",
+         g48_thr=1400, new=True),
 ]
 
 
@@ -110,6 +122,7 @@ def export_meta_all():
             st = pickle.load(f)
         cfg = get_cfg(name)
         n = sum(int(np.prod(s)) for s in M.param_shapes(cfg).values())
+        ri, rel = RELEASES.get(name, (99, ""))
         infos.append({
             "id": name, "label": info["label"],
             "version": VERSIONS[name],
@@ -121,6 +134,8 @@ def export_meta_all():
             "file": f"models/{name}.bin",
             "desc": info["desc"],
             "isNew": bool(info.get("new", False)),
+            "ri": ri, "released": rel,
+            "main": name in MAIN_MODELS,
         })
     with open(os.path.join(ROOT, "models", "meta.json"), "w") as f:
         json.dump({"models": infos, "palette": PA.palette_hex()}, f, indent=1)

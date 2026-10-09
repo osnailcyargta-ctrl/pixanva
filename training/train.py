@@ -22,6 +22,8 @@ MODELS = {
     # rilis 1.2 / QW — arsitektur sama, dilatih lanjutan lebih lama + finetune G48 lebih banyak
     "dark12": dict(d=192, L=6, H=6, mlp=768, b16=12, b32=4,  lr=3e-4,   steps=1230, theta=1000.0, b48=1),
     "heavyqw": dict(d=256, L=8, H=8, mlp=1024, b16=8, b32=2, lr=2.6e-4, steps=1880, theta=1000.0, b48=1),
+    # rilis 1.5 — parameter NAIK beneran (d 192→224, L 6→8, H 7, mlp 896) — training dari nol
+    "dark15": dict(d=224, L=8, H=7, mlp=896, b16=10, b32=2,  lr=2.8e-4, steps=1400, theta=1000.0, b48=1),
 }
 
 VAL_SEED = 12345

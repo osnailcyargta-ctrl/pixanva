@@ -13,7 +13,10 @@
    "val_loss": 0.6800645115109805,
    "file": "models/light.bin",
    "desc": "Cepat & ringan \u2014 paling sederhana",
-   "isNew": false
+   "isNew": false,
+   "ri": 1,
+   "released": "2026-10-07",
+   "main": true
   },
   {
    "id": "dark",
@@ -28,7 +31,28 @@
    "val_loss": 0.712774627908905,
    "file": "models/dark.bin",
    "desc": "Seimbang \u2014 kualitas & kecepatan",
-   "isNew": false
+   "isNew": false,
+   "ri": 2,
+   "released": "2026-10-07",
+   "main": false
+  },
+  {
+   "id": "heavy",
+   "label": "Pixanva Heavy QQ",
+   "version": "qq",
+   "d": 256,
+   "L": 8,
+   "H": 8,
+   "params": 6359296,
+   "step": 1430,
+   "g48": true,
+   "val_loss": 0.7173710792812775,
+   "file": "models/heavy.bin",
+   "desc": "Paling kuat generasi awal \u2014 paling detail, paling lambat",
+   "isNew": false,
+   "ri": 3,
+   "released": "2026-10-07",
+   "main": false
   },
   {
    "id": "dark12",
@@ -43,22 +67,10 @@
    "val_loss": 0.6896785545236903,
    "file": "models/dark12.bin",
    "desc": "Versi 1.2 \u2014 dilatih lebih lama, 96/128px makin rapi, lebih taat tag",
-   "isNew": true
-  },
-  {
-   "id": "heavy",
-   "label": "Pixanva Heavy QQ",
-   "version": "qq",
-   "d": 256,
-   "L": 8,
-   "H": 8,
-   "params": 6359296,
-   "step": 1430,
-   "g48": true,
-   "val_loss": 0.7173710792812775,
-   "file": "models/heavy.bin",
-   "desc": "Paling kuat \u2014 paling detail, paling lambat",
-   "isNew": false
+   "isNew": false,
+   "ri": 4,
+   "released": "2026-10-09",
+   "main": false
   },
   {
    "id": "heavyqw",
@@ -73,7 +85,28 @@
    "val_loss": 0.6921440028317747,
    "file": "models/heavyqw.bin",
    "desc": "Update 0.2 dari QQ \u2014 makin taat tag & makin detail",
-   "isNew": true
+   "isNew": false,
+   "ri": 5,
+   "released": "2026-10-09",
+   "main": true
+  },
+  {
+   "id": "dark15",
+   "label": "Pixanva Dark 1.5",
+   "version": "1.5",
+   "d": 224,
+   "L": 8,
+   "H": 7,
+   "params": 4876256,
+   "step": 1480,
+   "g48": true,
+   "val_loss": 0.6602164513484882,
+   "file": "models/dark15.bin",
+   "desc": "Update 0.3 \u2014 parameter naik beneran (2.7M \u2192 4.9M, 6 \u2192 8 lapis)",
+   "isNew": true,
+   "ri": 6,
+   "released": "2026-10-09",
+   "main": true
   }
  ],
  "palette": [
