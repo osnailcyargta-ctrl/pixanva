@@ -37,7 +37,7 @@ const state = {
 function getWorker() {
   if (!state.worker) {
     // ?v= rilis — bust cache CDN/browser tiap deploy (Pages cache 10 menit)
-    state.worker = new Worker("js/worker.js?v=v18", { type: "module" });
+    state.worker = new Worker("js/worker.js?v=v19", { type: "module" });
     state.worker.onmessage = onWorkerMsg;
     state.worker.onerror = (e) => setStatus("error worker: " + e.message);
   }
@@ -296,7 +296,7 @@ function cinematicReveal(p, tokens, onDone, delayMs = 0, region = { x: 0, y: 0, 
     const stepLayer = () => {
       if (li >= layers.length) { brushHide(); if (onDone) onDone(); return; }
       const lc = cvs[li];
-      const dur = 260 + li * 70;
+      const dur = 400 + li * 130; // lebih pelan biar kelihatan layer demi layer
       const t0 = performance.now();
       // setTimeout loop (bukan rAF) — tetap jalan walau tab lagi gak fokus
       const anim = () => {
@@ -468,18 +468,12 @@ function finishGen(m) {
     setStatus("selesai");
     saveOneCanvas($("#canvas"), state.lastRun.cond, state.seed, m.G, outPx);
   };
-  if (state.genfx) {
-    // balikin animasi drawing per layer: gambarnya di-draw ulang kasar → detail
-    clearRevealNow();
-    const ctx = $("#canvas").getContext("2d");
-    ctx.fillStyle = "#0b0d11";
-    ctx.fillRect(0, 0, outPx, outPx);
-    cinematicReveal({ G: m.G, out: outPx, smooth: curSmooth, ctx }, m.tokens, done);
-  } else {
-    // 128 dari grid 48 (non-integer): halus bilinear — tanpa dither biar pixel gak aneh
-    blitGrid(curSmooth);
-    done();
-  }
+  // reveal sinematik SELALU main pas gambar selese (animasi hasil — gak ikut toggle blur loading)
+  clearRevealNow();
+  const ctx = $("#canvas").getContext("2d");
+  ctx.fillStyle = "#0b0d11";
+  ctx.fillRect(0, 0, outPx, outPx);
+  cinematicReveal({ G: m.G, out: outPx, smooth: curSmooth, ctx }, m.tokens, done);
 }
 
 // ---------- galeri ----------
@@ -974,16 +968,15 @@ function finishVarCell(m) {
   const cond0 = { scene: state.scene, color: state.color, mood: state.mood, orn: [...state.orn] };
   q.results.forEach((r, i2) => {
     saveOneCanvas(state.painters[i2].cv, cond0, r.seed, q.rg.G, q.rg.out);
-    if (state.genfx) {
-      const p2 = state.painters[i2];
-      p2.ctx.fillStyle = "#0b0d11";
-      p2.ctx.fillRect(0, 0, p2.out, p2.out);
-      cinematicReveal(
-        { G: q.rg.G, out: q.rg.out, smooth: q.rg.smooth, ctx: p2.ctx }, r.tokens, null,
-        350 + i2 * 190,
-        { x: (i2 % 2) * 0.5, y: Math.floor(i2 / 2) * 0.5, w: 0.5, h: 0.5 }
-      );
-    }
+    // reveal per layer rame-rame — SELALU, gak ikut toggle blur loading
+    const p2 = state.painters[i2];
+    p2.ctx.fillStyle = "#0b0d11";
+    p2.ctx.fillRect(0, 0, p2.out, p2.out);
+    cinematicReveal(
+      { G: q.rg.G, out: q.rg.out, smooth: q.rg.smooth, ctx: p2.ctx }, r.tokens, null,
+      350 + i2 * 190,
+      { x: (i2 % 2) * 0.5, y: Math.floor(i2 / 2) * 0.5, w: 0.5, h: 0.5 }
+    );
   });
   state.varRes = { results: q.results, conds: q.conds, opts: q.opts, rg: q.rg };
 }
