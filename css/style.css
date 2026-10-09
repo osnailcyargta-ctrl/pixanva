@@ -486,9 +486,12 @@ body[data-theme="capcut"] .modal-card {
    ============================================================ */
 
 /* ---------- blur SELURUH gambar sekali (bukan per sel) saat generate ---------- */
-/* blend warna beneran: gak digelapin, saturasi naik — hasilnya smeared warna yang jelas */
+/* blend warna beneran: gak digelapin, saturasi naik — hasilnya smeared warna yang jelas.
+   reveal per baris ikut di-blur — detail tajam baru muncul pas generate selesai */
 .canvas-box.generating #canvas,
-.canvas-box.generating .var-grid {
+.canvas-box.generating .var-grid,
+.canvas-box.generating #revealCv,
+.canvas-box.generating .var-reveal canvas {
   filter: blur(48px) saturate(1.65) brightness(1.14);
   transform: scale(1.07);
 }
