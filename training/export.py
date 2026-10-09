@@ -12,10 +12,28 @@ from train import get_cfg, MODELS
 BASE = os.path.dirname(os.path.abspath(__file__))
 ROOT = os.path.join(BASE, "..")
 
+# versi pixanva — heavy pake skema qwerty (q..m, lanjut w...), tiap huruf = +0.2
 VERSIONS = {
-    # versi pixanva — heavy pake skema qwerty (q..m, lanjut w...)
+    "light": "1.0",
+    "dark": "1.0",
+    "dark12": "1.2",
     "heavy": "qq",
+    "heavyqw": "qw",
 }
+
+# urutan meta.json = lama -> baru (popup More models nampilin kebalikannya)
+MODEL_INFO = [
+    dict(id="light",  label="Pixanva Light 1.0",  desc="Cepat & ringan — paling sederhana",
+         g48_thr=800),
+    dict(id="dark",   label="Pixanva Dark 1.0",   desc="Seimbang — kualitas & kecepatan",
+         g48_thr=800),
+    dict(id="dark12", label="Pixanva Dark 1.2",   desc="Versi 1.2 — dilatih lebih lama, 96/128px makin rapi, lebih taat tag",
+         g48_thr=1230, new=True),
+    dict(id="heavy",  label="Pixanva Heavy QQ",   desc="Paling kuat — paling detail, paling lambat",
+         g48_thr=1400),
+    dict(id="heavyqw", label="Pixanva Heavy QW",  desc="Update 0.2 dari QQ — makin taat tag & makin detail",
+         g48_thr=1880, new=True),
+]
 
 
 def qwerty_version(i):
@@ -83,7 +101,8 @@ def export_webdata():
 
 def export_meta_all():
     infos = []
-    for name in ("light", "dark", "heavy"):
+    for info in MODEL_INFO:
+        name = info["id"]
         ck = os.path.join(ROOT, "state", f"{name}.pkl")
         if not os.path.exists(ck):
             continue
@@ -91,19 +110,17 @@ def export_meta_all():
             st = pickle.load(f)
         cfg = get_cfg(name)
         n = sum(int(np.prod(s)) for s in M.param_shapes(cfg).values())
-        label = {"light": "Pixanva Light 1.0", "dark": "Pixanva Dark 1.0",
-                 "heavy": f"Pixanva Heavy {VERSIONS['heavy'].upper()}"}[name]
         infos.append({
-            "id": name, "label": label, "version": "1.0" if name != "heavy" else VERSIONS["heavy"],
+            "id": name, "label": info["label"],
+            "version": VERSIONS[name],
             "d": cfg["d"], "L": cfg["L"], "H": cfg["H"],
             "params": n, "step": st["step"],
             # g48: model pernah di-finetune grid 48x48 (utk output 96/128px)
-            "g48": st["step"] > {"light": 800, "dark": 800, "heavy": 1400}[name],
+            "g48": st["step"] > info["g48_thr"],
             "val_loss": st["history"]["val"][-1][1] if st["history"]["val"] else None,
             "file": f"models/{name}.bin",
-            "desc": {"light": "Cepat & ringan — paling sederhana",
-                     "dark": "Seimbang — kualitas & kecepatan",
-                     "heavy": "Paling kuat — paling detail, paling lambat"}[name],
+            "desc": info["desc"],
+            "isNew": bool(info.get("new", False)),
         })
     with open(os.path.join(ROOT, "models", "meta.json"), "w") as f:
         json.dump({"models": infos, "palette": PA.palette_hex()}, f, indent=1)
@@ -115,7 +132,8 @@ if __name__ == "__main__":
     which = sys.argv[1] if len(sys.argv) > 1 else "all"
     if which in ("all", "webdata"):
         export_webdata()
-    for name in ("light", "dark", "heavy"):
+    names = [i["id"] for i in MODEL_INFO]
+    for name in names:
         if which in ("all", name) and os.path.exists(os.path.join(ROOT, "state", f"{name}.pkl")):
             export_model(name)
     export_meta_all()

@@ -5,7 +5,9 @@ const $ = (s) => document.querySelector(s);
 const DEFAULTS = {
   light: { temp: 0.95, topk: 32, cfg: 1.3 },
   dark: { temp: 0.90, topk: 24, cfg: 1.6 },
+  dark12: { temp: 0.90, topk: 24, cfg: 1.7 },
   heavy: { temp: 0.85, topk: 24, cfg: 1.6 },
+  heavyqw: { temp: 0.85, topk: 24, cfg: 1.7 },
 };
 
 const state = {
@@ -27,7 +29,7 @@ const state = {
 function getWorker() {
   if (!state.worker) {
     // ?v= rilis — bust cache CDN/browser tiap deploy (Pages cache 10 menit)
-    state.worker = new Worker("js/worker.js?v=qq1", { type: "module" });
+    state.worker = new Worker("js/worker.js?v=qw1", { type: "module" });
     state.worker.onmessage = onWorkerMsg;
     state.worker.onerror = (e) => setStatus("error worker: " + e.message);
   }
@@ -301,37 +303,65 @@ function labelOf(group, id) {
 }
 
 // ---------- model selector ----------
+function modelById(id) { return state.meta.models.find((x) => x.id === id); }
+function fmtMeta(m) {
+  return `${(m.params / 1e6).toFixed(1)}M param • ${m.L}L × ${m.H}H • d=${m.d}` +
+    (m.val_loss ? ` • val ${m.val_loss.toFixed(2)}` : "");
+}
+
 async function initModels() {
   const res = await fetch("models/meta.json");
   state.meta = await res.json();
-  const list = $("#modelList");
-  list.innerHTML = "";
-  for (const m of state.meta.models) {
-    const card = document.createElement("div");
-    card.className = "model-card";
-    card.dataset.id = m.id;
-    card.innerHTML = `
-      <div class="mc-name">${m.label} <span class="dot"></span></div>
+  selectModel("heavyqw"); // default: rilis terbaru (sekaligus render kartu + popup)
+  showStep(1);
+}
+
+// kartu model aktif di sidebar
+function renderModelNow() {
+  const m = modelById(state.model);
+  if (!m) return;
+  $("#modelNow").innerHTML = `
+    <div class="model-card active">
+      <div class="mc-name">${m.label}${m.isNew ? ' <span class="tag-new">BARU</span>' : ""}</div>
       <div class="mc-desc">${m.desc}</div>
-      <div class="mc-meta">${(m.params / 1e6).toFixed(1)}M param • ${m.L}L × ${m.H}H • d=${m.d} • step ${m.step}${m.val_loss ? ` • val ${m.val_loss.toFixed(2)}` : ""}</div>`;
-    card.onclick = () => selectModel(m.id);
+      <div class="mc-meta">${fmtMeta(m)} • step ${m.step}</div>
+    </div>`;
+}
+
+// isi popup More models — terbaru dulu, model lama tetap bisa dipilih
+function renderModelsModal() {
+  const list = $("#mmList");
+  list.innerHTML = "";
+  for (const m of [...state.meta.models].reverse()) {
+    const card = document.createElement("div");
+    card.className = "mm-item" + (m.id === state.model ? " active" : "");
+    card.innerHTML = `
+      <div class="mm-top">
+        <span class="mm-name">${m.label}</span>
+        ${m.isNew ? '<span class="tag-new">BARU</span>' : ""}
+        ${m.id === state.model ? '<span class="tag-cur">aktif</span>' : ""}
+      </div>
+      <div class="mc-desc">${m.desc}</div>
+      <div class="mc-meta">${fmtMeta(m)} • step ${m.step}</div>`;
+    card.onclick = () => {
+      selectModel(m.id);
+      $("#modelsModal").hidden = true;
+    };
     list.appendChild(card);
   }
-  selectModel("heavy");
-  showStep(1);
 }
 
 function selectModel(id) {
   state.model = id;
-  document.querySelectorAll(".model-card").forEach((c) =>
-    c.classList.toggle("active", c.dataset.id === id));
-  const m = state.meta.models.find((x) => x.id === id);
+  const m = modelById(id);
   $("#badgeModel").textContent = m.label;
   $("#badgeInfo").textContent = `${(m.params / 1e6).toFixed(1)}M parameter`;
-  const d = DEFAULTS[id];
+  const d = DEFAULTS[id] || DEFAULTS.heavy;
   $("#temp").value = d.temp; $("#tempVal").textContent = d.temp;
   $("#topk").value = d.topk; $("#topkVal").textContent = d.topk;
   $("#cfg").value = d.cfg; $("#cfgVal").textContent = d.cfg;
+  renderModelNow();
+  renderModelsModal();
   state.loaded.delete(id); // force reload meta utk model ini kalau berganti
   if (state.worker) {
     getWorker().postMessage({ type: "load", model: id });
@@ -431,13 +461,70 @@ function initEvents() {
   $("#temp").oninput = () => $("#tempVal").textContent = $("#temp").value;
   $("#topk").oninput = () => $("#topkVal").textContent = $("#topk").value;
   $("#cfg").oninput = () => $("#cfgVal").textContent = $("#cfg").value;
-  $("#btnAbout").onclick = () => $("#aboutModal").hidden = false;
+  // ----- modals: more models / pengaturan / tentang -----
+  $("#btnMoreModels").onclick = () => $("#modelsModal").hidden = false;
+  $("#btnCloseModels").onclick = () => $("#modelsModal").hidden = true;
+  $("#modelsModal").onclick = (e) => { if (e.target === $("#modelsModal")) $("#modelsModal").hidden = true; };
+
+  const openSettings = () => { $("#settingsModal").hidden = false; };
+  $("#btnSettings").onclick = openSettings;
+  $("#btnSettingsTop").onclick = openSettings;
+  $("#btnCloseSettings").onclick = () => $("#settingsModal").hidden = true;
+  $("#settingsModal").onclick = (e) => { if (e.target === $("#settingsModal")) $("#settingsModal").hidden = true; };
+
+  const openAbout = () => { $("#settingsModal").hidden = true; $("#aboutModal").hidden = false; };
+  $("#btnAboutSettings").onclick = openAbout;
   $("#btnCloseAbout").onclick = () => $("#aboutModal").hidden = true;
   $("#aboutModal").onclick = (e) => { if (e.target === $("#aboutModal")) $("#aboutModal").hidden = true; };
-  $("#btnClear").onclick = () => {
-    localStorage.removeItem(galKey());
-    renderGallery();
+
+  // bersihkan galeri — konfirmasi 2 langkah (klik lagi dlm 3 dtk)
+  let clearArm = null;
+  $("#btnClearSettings").onclick = () => {
+    const b = $("#btnClearSettings");
+    if (clearArm) {
+      clearTimeout(clearArm); clearArm = null;
+      localStorage.removeItem(galKey());
+      renderGallery();
+      b.textContent = "beres";
+      setTimeout(() => (b.textContent = "Bersihkan"), 1200);
+    } else {
+      b.textContent = "Yakin? klik lagi";
+      clearArm = setTimeout(() => { clearArm = null; b.textContent = "Bersihkan"; }, 3000);
+    }
   };
+
+  // ----- toggle CapCut (default mati, persist di localStorage) -----
+  $("#swCapcut").onclick = () =>
+    applyCapcut(!document.body.classList.contains("capcut"));
+
+  // ----- bottom nav (mode capcut) -----
+  const setCapTab = (t) => {
+    $("#capBtnBuat").classList.toggle("on", t === "buat");
+    $("#capBtnGaleri").classList.toggle("on", t === "galeri");
+    $("#capBtnSetelan").classList.toggle("on", false);
+  };
+  $("#capBtnBuat").onclick = () => {
+    document.body.classList.remove("cc-gal");
+    setCapTab("buat");
+    window.scrollTo({ top: 0, behavior: "smooth" });
+  };
+  $("#capBtnGaleri").onclick = () => {
+    const on = document.body.classList.toggle("cc-gal");
+    setCapTab(on ? "galeri" : "buat");
+  };
+  $("#capBtnSetelan").onclick = () => $("#settingsModal").hidden = false;
+  $("#sheetHandle").onclick = () => {
+    document.body.classList.remove("cc-gal");
+    setCapTab("buat");
+  };
+}
+
+function applyCapcut(on) {
+  document.body.classList.toggle("capcut", on);
+  if (!on) document.body.classList.remove("cc-gal");
+  $("#swCapcut").classList.toggle("on", on);
+  $("#swCapcut").setAttribute("aria-pressed", on ? "true" : "false");
+  try { localStorage.setItem("pixanva_capcut", on ? "1" : "0"); } catch {}
 }
 
 function startGenWith(cond, opts) {
@@ -489,6 +576,10 @@ function wizAdvance() {
   initChips();
   initEvents();
   renderGallery();
+  // mode capcut: default MATI kecuali user udah nyala-in sebelumnya
+  let cc = false;
+  try { cc = localStorage.getItem("pixanva_capcut") === "1"; } catch {}
+  applyCapcut(cc);
   try {
     await initModels();
     getWorker().postMessage({ type: "load", model: state.model });

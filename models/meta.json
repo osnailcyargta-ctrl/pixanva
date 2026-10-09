@@ -12,7 +12,8 @@
    "g48": false,
    "val_loss": 0.6800645115109805,
    "file": "models/light.bin",
-   "desc": "Cepat & ringan \u2014 paling sederhana"
+   "desc": "Cepat & ringan \u2014 paling sederhana",
+   "isNew": false
   },
   {
    "id": "dark",
@@ -26,7 +27,23 @@
    "g48": true,
    "val_loss": 0.712774627908905,
    "file": "models/dark.bin",
-   "desc": "Seimbang \u2014 kualitas & kecepatan"
+   "desc": "Seimbang \u2014 kualitas & kecepatan",
+   "isNew": false
+  },
+  {
+   "id": "dark12",
+   "label": "Pixanva Dark 1.2",
+   "version": "1.2",
+   "d": 192,
+   "L": 6,
+   "H": 6,
+   "params": 2700096,
+   "step": 1275,
+   "g48": true,
+   "val_loss": 0.6896785545236903,
+   "file": "models/dark12.bin",
+   "desc": "Versi 1.2 \u2014 dilatih lebih lama, 96/128px makin rapi, lebih taat tag",
+   "isNew": true
   },
   {
    "id": "heavy",
@@ -40,7 +57,23 @@
    "g48": true,
    "val_loss": 0.7173710792812775,
    "file": "models/heavy.bin",
-   "desc": "Paling kuat \u2014 paling detail, paling lambat"
+   "desc": "Paling kuat \u2014 paling detail, paling lambat",
+   "isNew": false
+  },
+  {
+   "id": "heavyqw",
+   "label": "Pixanva Heavy QW",
+   "version": "qw",
+   "d": 256,
+   "L": 8,
+   "H": 8,
+   "params": 6359296,
+   "step": 1930,
+   "g48": true,
+   "val_loss": 0.6921440028317747,
+   "file": "models/heavyqw.bin",
+   "desc": "Update 0.2 dari QQ \u2014 makin taat tag & makin detail",
+   "isNew": true
   }
  ],
  "palette": [

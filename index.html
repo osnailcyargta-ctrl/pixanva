@@ -10,7 +10,8 @@
 <body>
 <div class="app">
   <!-- ===== SIDEBAR ===== -->
-  <aside class="sidebar">
+  <aside class="sidebar" id="sidebar">
+    <div class="sheet-handle" id="sheetHandle" title="Tutup"><i></i></div>
     <div class="logo">
       <div class="logo-mark">
         <span></span><span></span><span></span><span></span>
@@ -22,7 +23,11 @@
     </div>
 
     <div class="section-label">Model</div>
-    <div class="model-list" id="modelList"></div>
+    <div class="model-now" id="modelNow"></div>
+    <button class="btn ghost wide" id="btnMoreModels">
+      <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round"><path d="M6 9l6 6 6-6"/></svg>
+      More models
+    </button>
 
     <div class="section-label">Galeri <span class="muted" id="galCount"></span></div>
     <div class="gallery" id="gallery">
@@ -30,8 +35,10 @@
     </div>
 
     <div class="sidebar-foot">
-      <button class="btn ghost small" id="btnAbout">Tentang Pixanva</button>
-      <button class="btn ghost small" id="btnClear">Bersihkan galeri</button>
+      <button class="btn ghost small" id="btnSettings">
+        <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 1 1-4 0v-.09a1.65 1.65 0 0 0-1-1.51 1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 1 1 0-4h.09a1.65 1.65 0 0 0 1.51-1 1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06a1.65 1.65 0 0 0 1.82.33h.01a1.65 1.65 0 0 0 1-1.51V3a2 2 0 1 1 4 0v.09a1.65 1.65 0 0 0 1 1.51h.01a1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82v.01a1.65 1.65 0 0 0 1.51 1H21a2 2 0 1 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/></svg>
+        Pengaturan
+      </button>
     </div>
   </aside>
 
@@ -44,6 +51,9 @@
       </div>
       <div class="topbar-right">
         <span class="muted" id="statusLine">siap</span>
+        <button class="iconbtn" id="btnSettingsTop" title="Pengaturan">
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 1 1-4 0v-.09a1.65 1.65 0 0 0-1-1.51 1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 1 1 0-4h.09a1.65 1.65 0 0 0 1.51-1 1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06a1.65 1.65 0 0 0 1.82.33h.01a1.65 1.65 0 0 0 1-1.51V3a2 2 0 1 1 4 0v.09a1.65 1.65 0 0 0 1 1.51h.01a1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82v.01a1.65 1.65 0 0 0 1.51 1H21a2 2 0 1 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/></svg>
+        </button>
       </div>
     </header>
 
@@ -52,7 +62,7 @@
         <canvas id="canvas" width="256" height="256"></canvas>
         <div class="stage-empty" id="stageEmpty">
           <div class="stage-empty-title">Kanvas masih kosong</div>
-          <div class="stage-empty-sub">Pilih tag di panel kanan, lalu tekan Generate.<br>Pixanva akan melukis sel demi sel di depan mata lo.</div>
+          <div class="stage-empty-sub">Pilih tag di panel bawah/kanan, lalu tekan Generate.<br>Pixanva akan melukis sel demi sel di depan mata lo.</div>
         </div>
       </div>
       <div class="stage-meta">
@@ -135,6 +145,79 @@
   </aside>
 </div>
 
+<!-- ===== BOTTOM NAV (mode CapCut) ===== -->
+<nav class="capnav" id="capNav">
+  <button class="cn-btn on" id="capBtnBuat">
+    <svg width="19" height="19" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 19l7-7 3 3-7 7-3-3z"/><path d="M18 13l-1.5-7.5L2 2l3.5 14.5L13 18l5-5z"/></svg>
+    <span>Buat</span>
+  </button>
+  <button class="cn-btn" id="capBtnGaleri">
+    <svg width="19" height="19" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="18" height="18" rx="2"/><circle cx="8.5" cy="8.5" r="1.5"/><path d="M21 15l-5-5L5 21"/></svg>
+    <span>Galeri</span>
+  </button>
+  <button class="cn-btn" id="capBtnSetelan">
+    <svg width="19" height="19" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 1 1-4 0v-.09a1.65 1.65 0 0 0-1-1.51 1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 1 1 0-4h.09a1.65 1.65 0 0 0 1.51-1 1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06a1.65 1.65 0 0 0 1.82.33h.01a1.65 1.65 0 0 0 1-1.51V3a2 2 0 1 1 4 0v.09a1.65 1.65 0 0 0 1 1.51h.01a1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82v.01a1.65 1.65 0 0 0 1.51 1H21a2 2 0 1 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/></svg>
+    <span>Setelan</span>
+  </button>
+</nav>
+
+<!-- ===== MODAL: MORE MODELS ===== -->
+<div class="modal" id="modelsModal" hidden>
+  <div class="modal-card">
+    <div class="modal-head">
+      <div>
+        <div class="logo-name">Semua model</div>
+        <div class="muted">model lama tetap bisa dipilih</div>
+      </div>
+      <button class="btn ghost small" id="btnCloseModels">tutup</button>
+    </div>
+    <div class="modal-body mm-list" id="mmList"></div>
+  </div>
+</div>
+
+<!-- ===== MODAL: PENGATURAN ===== -->
+<div class="modal" id="settingsModal" hidden>
+  <div class="modal-card">
+    <div class="modal-head">
+      <div class="logo-name">Pengaturan</div>
+      <button class="btn ghost small" id="btnCloseSettings">tutup</button>
+    </div>
+    <div class="modal-body">
+      <div class="set-group">
+        <div class="set-title">Tampilan</div>
+        <div class="set-row">
+          <div class="set-info">
+            <b>Menu gaya CapCut</b>
+            <small>Ubah seluruh UI jadi ala editor CapCut: hitam pekat, navigasi bawah,
+            panel &amp; galeri geser dari bawah. Default mati.</small>
+          </div>
+          <button class="switch" id="swCapcut" aria-pressed="false" title="Toggle menu CapCut"><i></i></button>
+        </div>
+      </div>
+      <div class="set-group">
+        <div class="set-title">Galeri</div>
+        <div class="set-row">
+          <div class="set-info">
+            <b>Bersihkan galeri</b>
+            <small>Hapus semua karya tersimpan di browser ini (gak bisa dibatalin).</small>
+          </div>
+          <button class="btn ghost small danger" id="btnClearSettings">Bersihkan</button>
+        </div>
+      </div>
+      <div class="set-group">
+        <div class="set-title">Info</div>
+        <div class="set-row">
+          <div class="set-info">
+            <b>Tentang Pixanva</b>
+            <small>Apa itu Pixanva, cara kerja transformer-nya, dan skema versi model.</small>
+          </div>
+          <button class="btn ghost small" id="btnAboutSettings">Buka</button>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+
 <!-- ===== ABOUT MODAL ===== -->
 <div class="modal" id="aboutModal" hidden>
   <div class="modal-card">
@@ -157,16 +240,17 @@
       native sel-per-sel. 128px = grid 48×48 yang dihaluskan (bilinear antar sel + kuantisasi ulang
       ke palet + dither bayer) — tahap "menambah detail" ini bisa lo lihat jalan per-band.
       Pixanva Light cuma dilatih grid 16/32, jadi 96/128px-nya pakai sel lebih besar.</p>
-      <p><b>Versi:</b> Light & Dark pakai penomoran 1.0. Heavy pakai skema <b>QWERTY</b>:
-      dua huruf berurutan sesuai layout keyboard (q→w→e→r→t→y→u→i→o→p→a→s→d→f→g→h→j→k→l→z→x→c→v→b→n→m),
-      dari QQ, QW, QE … sampai QM, lalu naik ke WQ, WW, WE … dan seterusnya. Saat ini:
-      <b>Pixanva Heavy QQ</b> — 6.359.296 parameter.</p>
+      <p><b>Model &amp; versi:</b> Light &amp; Dark pakai penomoran desimal (naik 0.2 = update menengah).
+      Heavy pakai skema <b>QWERTY</b>: dua huruf berurutan sesuai layout keyboard
+      (q→w→e→r→t→y→u→i→o→p→a→s→d→f→g→h→j→k→l→z→x→c→v→b→n→m) — setiap naik satu huruf = <b>+0.2 versi</b>:
+      QQ, lalu QW (+0.2), QE (+0.4) … sampai QM, lanjut WQ, WW, WE … dan seterusnya.
+      Model lama gak pernah dihapus — semua versi bisa dipilih lewat <b>More models</b>.</p>
       <p class="muted">Posisi token: kondisi di (i, 0), sel gambar di (baris, kolom+16) lewat RoPE 2D
       faktoris — satu model bisa gambar berbagai resolusi grid.</p>
     </div>
   </div>
 </div>
 
-<script type="module" src="js/app.js?v=qq1"></script>
+<script type="module" src="js/app.js?v=qw1"></script>
 </body>
 </html>

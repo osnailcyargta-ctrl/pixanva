@@ -15,9 +15,13 @@ BASE = os.path.dirname(os.path.abspath(__file__))
 MODELS = {
     # nama: (d, L, H, mlp, batch_g16, batch_g32, lr, steps)
     # b48: batch saat finetune G=48 — attention (B,H,T,T) harus muat di RAM 3GB
-    "light": dict(d=128, L=4, H=4, mlp=512, b16=24, b32=8,  lr=4e-4, steps=800, theta=1000.0, b48=4),
-    "dark":  dict(d=192, L=6, H=6, mlp=768, b16=12, b32=4,  lr=3e-4, steps=800, theta=1000.0, b48=1),
-    "heavy": dict(d=256, L=8, H=8, mlp=1024, b16=8, b32=2,  lr=2.6e-4, steps=800, theta=1000.0, b48=1),
+    # steps utk dark12/heavyqw = TOTAL langkah absolut (warm-restart dari bobot 1.0/QQ)
+    "light":  dict(d=128, L=4, H=4, mlp=512, b16=24, b32=8,  lr=4e-4,   steps=800,  theta=1000.0, b48=4),
+    "dark":   dict(d=192, L=6, H=6, mlp=768, b16=12, b32=4,  lr=3e-4,   steps=800,  theta=1000.0, b48=1),
+    "heavy":  dict(d=256, L=8, H=8, mlp=1024, b16=8, b32=2,  lr=2.6e-4, steps=800,  theta=1000.0, b48=1),
+    # rilis 1.2 / QW — arsitektur sama, dilatih lanjutan lebih lama + finetune G48 lebih banyak
+    "dark12": dict(d=192, L=6, H=6, mlp=768, b16=12, b32=4,  lr=3e-4,   steps=1230, theta=1000.0, b48=1),
+    "heavyqw": dict(d=256, L=8, H=8, mlp=1024, b16=8, b32=2, lr=2.6e-4, steps=1880, theta=1000.0, b48=1),
 }
 
 VAL_SEED = 12345

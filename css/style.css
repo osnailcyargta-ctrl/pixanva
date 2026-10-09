@@ -256,3 +256,183 @@ input[type="range"] { width: 100%; accent-color: var(--accent); }
   .panel { order: 3; border-left: none; border-top: 1px solid var(--border); }
   .stage-wrap { padding: 12px; }
 }
+
+/* ============================================================
+   TAMBAHAN RILIS QW: model-now, more models, pengaturan, capcut
+   ============================================================ */
+
+/* ---------- model aktif + tombol more models ---------- */
+.model-now { display: flex; }
+.model-now .model-card { flex: 1; cursor: default; }
+.btn.wide { width: 100%; display: flex; align-items: center; justify-content: center; gap: 7px; }
+.tag-new {
+  font-size: 9px; font-weight: 700; letter-spacing: .5px;
+  background: linear-gradient(135deg, #6c7bff, #39d98a);
+  color: #fff; border-radius: 999px; padding: 2px 7px;
+}
+.tag-cur {
+  font-size: 9.5px; font-weight: 600; color: var(--accent);
+  border: 1px solid var(--accent); border-radius: 999px; padding: 1px 7px;
+}
+
+/* ---------- modal more models ---------- */
+.mm-list { display: flex; flex-direction: column; gap: 8px; }
+.mm-item {
+  border: 1px solid var(--border); background: var(--panel2);
+  border-radius: var(--radius); padding: 11px 13px; cursor: pointer;
+  transition: border-color .15s, background .15s;
+}
+.mm-item:hover { border-color: var(--border2); }
+.mm-item.active { border-color: var(--accent); background: rgba(108, 123, 255, .08); }
+.mm-top { display: flex; align-items: center; gap: 8px; }
+.mm-name { font-weight: 650; font-size: 13.5px; flex: 1; }
+.mm-item .mc-desc { color: var(--muted); font-size: 11.5px; margin-top: 3px; }
+.mm-item .mc-meta { color: var(--muted); font-size: 10.5px; margin-top: 5px; font-variant-numeric: tabular-nums; }
+
+/* ---------- ikon & tombol setelan ---------- */
+.iconbtn {
+  background: transparent; border: 1px solid transparent; color: var(--muted);
+  border-radius: 8px; padding: 6px; cursor: pointer; display: inline-flex;
+  transition: color .15s, border-color .15s;
+}
+.iconbtn:hover { color: var(--text); border-color: var(--border2); }
+.topbar-right { display: flex; align-items: center; gap: 10px; }
+.sidebar-foot .btn { display: inline-flex; align-items: center; gap: 6px; justify-content: center; }
+.btn.danger { color: #ff6b81; border-color: rgba(255, 107, 129, .35); }
+.btn.danger:hover { background: rgba(255, 107, 129, .08); }
+
+/* ---------- modal pengaturan ---------- */
+.set-group { margin-bottom: 16px; }
+.set-group:last-child { margin-bottom: 2px; }
+.set-title {
+  font-size: 10.5px; text-transform: uppercase; letter-spacing: .8px;
+  color: var(--muted); margin-bottom: 8px;
+}
+.set-row {
+  display: flex; align-items: center; gap: 14px;
+  border: 1px solid var(--border); background: var(--panel2);
+  border-radius: var(--radius); padding: 11px 13px;
+}
+.set-info { flex: 1; display: flex; flex-direction: column; gap: 2px; }
+.set-info b { font-size: 13px; }
+.set-info small { color: var(--muted); font-size: 11.5px; line-height: 1.45; }
+.set-row .btn { flex-shrink: 0; }
+
+/* ---------- switch ---------- */
+.switch {
+  width: 44px; height: 26px; border-radius: 999px; flex-shrink: 0;
+  background: var(--panel); border: 1px solid var(--border2);
+  position: relative; cursor: pointer; transition: background .18s, border-color .18s;
+}
+.switch i {
+  position: absolute; top: 2px; left: 2px; width: 20px; height: 20px;
+  border-radius: 50%; background: var(--muted); transition: left .18s, background .18s;
+}
+.switch.on { background: rgba(108, 123, 255, .25); border-color: var(--accent); }
+.switch.on i { left: 20px; background: var(--accent); }
+
+/* ============================================================
+   MODE CAPCUT — body.capcut
+   hitam pekat, aksen gradasi cyan→biru, bottom nav, bottom sheet
+   ============================================================ */
+body.capcut {
+  --bg: #000000;
+  --panel: #0c0c0e;
+  --panel2: #17171b;
+  --border: #222228;
+  --border2: #2f2f38;
+  --text: #f4f4f6;
+  --muted: #8e8e98;
+  --accent: #22e0c4;
+  --accent-dim: #3d7eff;
+}
+body.capcut .btn.primary {
+  background: linear-gradient(135deg, #22e0c4, #3d7eff);
+  border-color: transparent; color: #04121a;
+}
+body.capcut .btn.primary:hover { filter: brightness(1.08); }
+body.capcut .chip.on {
+  background: linear-gradient(135deg, rgba(34, 224, 196, .22), rgba(61, 126, 255, .22));
+  border-color: var(--accent); color: #eafffb;
+}
+body.capcut .wdot.cur { background: linear-gradient(90deg, #22e0c4, #3d7eff); border-color: transparent; }
+body.capcut .switch.on { background: rgba(34, 224, 196, .18); border-color: var(--accent); }
+body.capcut .switch.on i { background: linear-gradient(135deg, #22e0c4, #3d7eff); }
+body.capcut .tag-new { background: linear-gradient(135deg, #22e0c4, #3d7eff); }
+body.capcut .badge { border-color: var(--border2); }
+body.capcut .model-card.active,
+body.capcut .mm-item.active { border-color: var(--accent); background: rgba(34, 224, 196, .07); }
+body.capcut .stage {
+  background:
+    radial-gradient(circle at 50% 42%, rgba(34, 224, 196, .06), transparent 60%),
+    repeating-conic-gradient(#0c0c0f 0% 25%, #08080a 0% 50%) 0 0 / 22px 22px;
+}
+body.capcut .btn.danger { color: #ff6b81; }
+
+/* layout capcut: kolom tunggal, sidebar jadi sheet galeri */
+body.capcut .app { display: flex; flex-direction: column; height: 100vh; }
+body.capcut .sidebar { display: none; }
+body.capcut .main { flex: 1; min-height: 0; }
+body.capcut .stage-wrap { padding: 12px 14px 8px; }
+body.capcut .panel {
+  border-left: none; border-top: 1px solid var(--border);
+  border-radius: 18px 18px 0 0; background: var(--panel);
+  max-height: 46vh; padding-bottom: 76px;
+}
+body.capcut .topbar { background: rgba(0, 0, 0, .8); }
+body.capcut #canvas { width: min(52vh, 100%); }
+
+/* bottom nav */
+.capnav {
+  display: none;
+  position: fixed; left: 0; right: 0; bottom: 0; z-index: 70;
+  background: rgba(8, 8, 10, .96); backdrop-filter: blur(10px);
+  border-top: 1px solid var(--border);
+  height: 62px; padding-bottom: env(safe-area-inset-bottom);
+}
+body.capcut .capnav { display: flex; }
+.cn-btn {
+  flex: 1; background: transparent; border: none; color: var(--muted);
+  display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 3px;
+  font-size: 10.5px; font-family: inherit; cursor: pointer;
+}
+.cn-btn span { font-weight: 550; }
+.cn-btn.on { color: var(--text); }
+.cn-btn.on svg { color: var(--accent); }
+
+/* galeri sbg bottom sheet */
+body.capcut.cc-gal .sidebar {
+  display: flex; position: fixed; left: 0; right: 0; bottom: 0; z-index: 80;
+  top: auto; height: 80vh; width: auto; max-width: none;
+  border: none; border-radius: 18px 18px 0 0;
+  background: #101013; box-shadow: 0 -18px 60px rgba(0, 0, 0, .6);
+  animation: sheetUp .22s ease; padding-bottom: 76px;
+}
+@keyframes sheetUp {
+  from { transform: translateY(40px); opacity: 0; }
+  to { transform: none; opacity: 1; }
+}
+body.capcut.cc-gal .capnav { z-index: 90; }
+.sheet-handle { display: none; }
+body.capcut.cc-gal .sheet-handle {
+  display: flex; justify-content: center; padding: 4px 0 0; cursor: pointer;
+}
+.sheet-handle i {
+  width: 44px; height: 4px; border-radius: 999px; background: var(--border2);
+}
+
+/* modal jadi bottom sheet */
+body.capcut .modal { align-items: flex-end; }
+body.capcut .modal-card {
+  width: 100%; max-width: none; border-radius: 18px 18px 0 0;
+  border-left: none; border-right: none; border-bottom: none;
+  max-height: 78vh; padding-bottom: 76px;
+  animation: sheetUp .22s ease;
+}
+
+/* responsive: capcut di layar sempit — panel bisa dilirik sambil liat kanvas */
+@media (max-width: 880px) {
+  body.capcut .app { height: auto; min-height: 100vh; }
+  body.capcut .panel { max-height: none; }
+  body.capcut.cc-gal .sidebar { height: 86vh; }
+}
