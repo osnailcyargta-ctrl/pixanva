@@ -110,6 +110,7 @@ function setupCanvas(G, out, smooth) {
   $("#varGrid").innerHTML = "";
   $("#canvas").style.display = "";
   state.painters = null;
+  clearRevealNow();
   brushHide();
   hideOverlay();
 }
@@ -129,14 +130,23 @@ function blitGrid(smooth) {
 }
 
 // routing token: ke kanvas utama / ke sel variasi yg lagi dilukis
+let revCtxs = [];
 function onToken(m) {
   const q = state.varQ;
   if (q && state.painters) {
     const p = state.painters[Math.min(q.cur, 3)];
     paintCellP(p, m.i, m.c);
     if (state.genfx) {
+      // blur di seluruh grid (1 elemen) + gambar tetap di-paint live di baliknya;
+      // tiap baris kelar → langsung ke-reveal sinematik tanpa nunggu selesai
       $("#genProgFill").style.width =
         (((q.cur + (m.i + 1) / m.total) / 4) * 100).toFixed(1) + "%";
+      requestBlit();
+      if ((m.i + 1) % p.G === 0) {
+        const y = Math.floor(m.i / p.G);
+        $("#paintInfo").textContent = `melukis variasi ${q.cur + 1}/4 … baris ${y + 1}/${p.G}`;
+        enqueueRow({ grid: p.gridCv, ctx: revCtxs[Math.min(q.cur, 3)], G: p.G, out: p.out, y, cell: q.cur, dx: 0 });
+      }
     } else if (m.i % 6 === 0 || m.i === m.total - 1) {
       blitPainter(p);
       brushFollow(q.cur, m.i, p.G);
@@ -148,6 +158,14 @@ function onToken(m) {
   paintCell(m.i, m.c, currentG);
   if (state.genfx) {
     $("#genProgFill").style.width = ((m.i + 1) / m.total * 100).toFixed(1) + "%";
+    requestBlit();
+    if ((m.i + 1) % currentG === 0) {
+      const y = Math.floor(m.i / currentG);
+      const dt = (performance.now() - genStart) / 1000;
+      $("#paintInfo").textContent = `melukis… baris ${y + 1}/${currentG} • ${dt.toFixed(1)}s`;
+      setStatus("melukis");
+      enqueueRow({ grid: gridCv, ctx: $("#revealCv").getContext("2d"), G: currentG, out: outPx, y, cell: -1, dx: 0 });
+    }
   } else if (m.i % 6 === 0 || m.i === m.total - 1) {
     blitGrid(curSmooth);
     brushFollow(-1, m.i, currentG);
@@ -267,85 +285,107 @@ function animateUpscale(tokens, G, out, onDone) {
   step();
 }
 
-// ---------- reveal sinematik: layer kasar → detail, kuas nyusul sweep ----------
-function layerCanvas(tokens, G, block, out) {
-  const g = Math.max(1, Math.ceil(G / block));
-  const small = document.createElement("canvas");
-  small.width = g; small.height = g;
-  const sc = small.getContext("2d");
-  const img = sc.createImageData(g, g);
-  const pal = palRGB();
-  for (let by = 0; by < g; by++) for (let bx = 0; bx < g; bx++) {
-    let r = 0, gg = 0, bb = 0, n = 0;
-    for (let y = by * block; y < Math.min(G, (by + 1) * block); y++)
-      for (let x = bx * block; x < Math.min(G, (bx + 1) * block); x++) {
-        // token di luar range warna (model kadang nge-sample token tag) → fallback hitam
-        const c = pal[tokens[y * G + x]] || pal[0];
-        r += c[0]; gg += c[1]; bb += c[2]; n++;
-      }
-    const pi = nearestPal(r / n, gg / n, bb / n);
-    const o = (by * g + bx) * 4;
-    img.data[o] = pal[pi][0]; img.data[o + 1] = pal[pi][1];
-    img.data[o + 2] = pal[pi][2]; img.data[o + 3] = 255;
-  }
-  sc.putImageData(img, 0, 0);
-  const big = document.createElement("canvas");
-  big.width = out; big.height = out;
-  const bc = big.getContext("2d");
-  bc.imageSmoothingEnabled = false;
-  bc.drawImage(small, 0, 0, out, out);
-  return big;
-}
-
-function cinematicReveal(p, tokens, onDone, delayMs = 0, region = { x: 0, y: 0, w: 1, h: 1 }) {
-  const layers = [8, 4, 2, 1];
-  const cvs = layers.map((b) => layerCanvas(tokens, p.G, b, p.out));
-  let li = 0;
-  const start = () => {
-    // tab gak kelihatan → timer di-throttle browser: skip sweep, langsung final
-    if (document.hidden) {
-      p.ctx.imageSmoothingEnabled = false;
-      p.ctx.drawImage(cvs[cvs.length - 1], 0, 0);
-      if (onDone) onDone();
-      return;
-    }
-    brushShow();
-    const stepLayer = () => {
-      if (li >= layers.length) { brushHide(); if (onDone) onDone(); return; }
-      const lc = cvs[li];
-      const dur = 260 + li * 70;
-      const t0 = performance.now();
-      // setTimeout loop (bukan rAF) — tetap jalan walau tab lagi gak fokus
-      const anim = () => {
-        const f = Math.min(1, (performance.now() - t0) / dur);
-        const x = Math.max(1, Math.ceil(f * p.out));
-        p.ctx.drawImage(lc, 0, 0, x, p.out, 0, 0, x, p.out);
-        brushTo(
-          region.x + f * region.w,
-          region.y + region.h * (0.5 + 0.32 * Math.sin(f * Math.PI * 2)),
-          true
-        );
-        if (f < 1) setTimeout(anim, 16);
-        else { li++; stepLayer(); }
-      };
-      anim();
-    };
-    stepLayer();
-  };
-  if (delayMs > 0) setTimeout(start, delayMs);
-  else start();
-}
-
-// ---------- overlay loading (blur sel + spinner + progress + generating…) ----------
+// ---------- overlay loading (blur SEKALI di seluruh gambar + spinner + progress) ----------
 function showOverlay() {
   if (!state.genfx) return;
   $("#genOverlay").hidden = false;
   $("#genProgFill").style.width = "0%";
   $("#canvasBox").classList.add("generating");
+  if (!state.varQ) {
+    const rv = $("#revealCv");
+    rv.hidden = false;
+    rv.width = outPx; rv.height = outPx;
+    rv.getContext("2d").clearRect(0, 0, outPx, outPx);
+    rv.style.opacity = "1";
+  }
+  brushShow();
 }
 function hideOverlay() {
   $("#genOverlay").hidden = true;
   $("#canvasBox").classList.remove("generating");
+}
+
+// ---------- reveal per baris: tiap baris kelar → langsung ke-draw sinematik ----------
+// animasinya jalan SEWAKTU generate — gak perlu nunggu 2 dtk di akhir
+const revQ = [];
+let revBusy = false;
+let rafPending = false;
+
+function liveBlit() {
+  rafPending = false;
+  if (!state.generating || !state.genfx) return;
+  const q = state.varQ;
+  if (q && state.painters) blitPainter(state.painters[Math.min(q.cur, 3)]);
+  else blitGrid(curSmooth);
+}
+function requestBlit() {
+  if (!state.genfx || rafPending) return;
+  rafPending = true;
+  requestAnimationFrame(liveBlit);
+}
+
+function enqueueRow(job) {
+  revQ.push(job);
+  pumpReveal();
+}
+function pumpReveal() {
+  if (revBusy) return;
+  const job = revQ.shift();
+  if (!job) return;
+  revBusy = true;
+  // tab gak kelihatan / antrian numpuk → gambar langsung tanpa animasi biar gak numpuk
+  if (document.hidden || revQ.length >= 3) {
+    drawRow(job, 1.02);
+    revBusy = false;
+    pumpReveal();
+    return;
+  }
+  const t0 = performance.now();
+  const dur = 150;
+  const step = () => {
+    const f = Math.min(1, (performance.now() - t0) / dur);
+    drawRow(job, f);
+    const bp = brushPosRow(job, f);
+    brushTo(bp.x, bp.y, true);
+    if (f < 1) setTimeout(step, 16);
+    else { drawRow(job, 1.03); revBusy = false; pumpReveal(); }
+  };
+  step();
+}
+// f boleh > 1 — fudge tipis biar tepi antar baris gak bolong
+function drawRow(j, f) {
+  const fc = Math.min(1, f);
+  const h = j.out / j.G;
+  j.ctx.drawImage(
+    j.grid, 0, j.y * 2, Math.max(0.02, j.G * fc), 2,
+    j.dx || 0, j.y * h, Math.max(0.02, j.out * fc), h
+  );
+}
+function brushPosRow(j, f) {
+  const fy = (j.y + 0.5) / j.G;
+  if (j.cell >= 0) {
+    return { x: (j.cell % 2) * 0.5 + f * 0.5, y: Math.floor(j.cell / 2) * 0.5 + fy * 0.5 };
+  }
+  return { x: f, y: fy };
+}
+function clearRevealNow() {
+  revQ.length = 0;
+  revBusy = false;
+  const rv = $("#revealCv");
+  rv.hidden = true;
+  rv.getContext("2d").clearRect(0, 0, rv.width, rv.height);
+  rv.style.opacity = "1";
+  const vr = $("#varReveal");
+  vr.hidden = true;
+  vr.querySelectorAll("canvas").forEach((c) => c.getContext("2d").clearRect(0, 0, c.width, c.height));
+}
+function clearRevealSoon() {
+  revQ.length = 0;
+  const rv = $("#revealCv");
+  rv.style.opacity = "0";
+  const vr = $("#varReveal");
+  vr.style.opacity = "0";
+  setTimeout(clearRevealNow, 420);
 }
 
 // ---------- generate ----------
@@ -403,18 +443,13 @@ function finishGen(m) {
     saveOneCanvas($("#canvas"), state.lastRun.cond, state.seed, m.G, outPx);
   };
   if (state.genfx) {
-    // bersihin dulu — hasil jangan kelihatan sebelum reveal sinematik
-    const ctx = $("#canvas").getContext("2d");
-    ctx.fillStyle = "#0b0d11";
-    ctx.fillRect(0, 0, outPx, outPx);
-    cinematicReveal({ cv: $("#canvas"), ctx, G: m.G, out: outPx }, m.tokens, () => {
-      if (curSmooth && m.G * 2 !== outPx) animateUpscale(m.tokens, m.G, outPx, done);
-      else done();
-    });
-  } else if (curSmooth && m.G * 2 !== outPx) {
+    // baris udah ke-reveal live selama generate — tinggal angkat blur-nya
+    clearRevealSoon();
+  }
+  if (curSmooth && m.G * 2 !== outPx) {
     animateUpscale(m.tokens, m.G, outPx, done);
   } else {
-    blitGrid(false);
+    if (!state.genfx) blitGrid(false);
     done();
   }
 }
@@ -701,6 +736,7 @@ function initEvents() {
   $("#cfg").oninput = () => $("#cfgVal").textContent = $("#cfg").value;
   // ----- modals: more models / pengaturan / tentang -----
   $("#btnMoreModels").onclick = () => $("#modelsModal").hidden = false;
+  $("#btnModelsTop").onclick = () => $("#modelsModal").hidden = false;
   $("#btnCloseModels").onclick = () => $("#modelsModal").hidden = true;
   $("#modelsModal").onclick = (e) => { if (e.target === $("#modelsModal")) $("#modelsModal").hidden = true; };
   // ----- sort popup more models: terbaru / terpintar + reverse -----
@@ -735,48 +771,71 @@ function initEvents() {
     }
   };
 
-  // ----- toggle CapCut (default mati, persist di localStorage) -----
-  $("#swCapcut").onclick = () =>
-    applyCapcut(!document.body.classList.contains("capcut"));
-
-  // ----- toggle layar loading blur (default nyala, persist) -----
+  // ----- toggle layar loading blur (default nyala, persist; reaktif mid-generate) -----
   $("#swGenfx").onclick = () => applyGenfx(!state.genfx);
 
-  // ----- bottom nav (mode capcut) -----
+  // ----- bottom nav (tema capcut) -----
   const setCapTab = (t) => {
     $("#capBtnBuat").classList.toggle("on", t === "buat");
     $("#capBtnGaleri").classList.toggle("on", t === "galeri");
     $("#capBtnSetelan").classList.toggle("on", false);
   };
   $("#capBtnBuat").onclick = () => {
-    document.body.classList.remove("cc-gal");
     setCapTab("buat");
     window.scrollTo({ top: 0, behavior: "smooth" });
   };
   $("#capBtnGaleri").onclick = () => {
-    const on = document.body.classList.toggle("cc-gal");
-    setCapTab(on ? "galeri" : "buat");
+    setCapTab("galeri");
+    const el = document.querySelector(".gallery-sec");
+    if (el) el.scrollIntoView({ behavior: "smooth", block: "start" });
   };
   $("#capBtnSetelan").onclick = () => $("#settingsModal").hidden = false;
-  $("#sheetHandle").onclick = () => {
-    document.body.classList.remove("cc-gal");
-    setCapTab("buat");
-  };
 }
 
-function applyCapcut(on) {
-  document.body.classList.toggle("capcut", on);
-  if (!on) document.body.classList.remove("cc-gal");
-  $("#swCapcut").classList.toggle("on", on);
-  $("#swCapcut").setAttribute("aria-pressed", on ? "true" : "false");
-  try { localStorage.setItem("pixanva_capcut", on ? "1" : "0"); } catch {}
+// ---------- tema tampilan (8 tema, persist, migrasi dari toggle capcut lama) ----------
+const THEMES = [
+  { id: "classic-dark", name: "Classic (Dark)", dots: ["#0e1014", "#6c7bff", "#39d98a"] },
+  { id: "classic-light", name: "Classic (Light)", dots: ["#eef1f7", "#5661f2", "#ffb648"] },
+  { id: "metal", name: "Classic (Metalic)", dots: ["#26292f", "#aeb9c9", "#7f8b9c"] },
+  { id: "paper", name: "Paper Doodle", dots: ["#f6efdd", "#33291d", "#e8590c"] },
+  { id: "capcut", name: "CapCut Typshit", dots: ["#000000", "#22e0c4", "#3d7eff"] },
+  { id: "neon", name: "Pixanva Neon", dots: ["#07070f", "#19e3ff", "#ff0dca"] },
+  { id: "sunset", name: "Senja Jam", dots: ["#1f1014", "#ff8a5c", "#ff5c7a"] },
+  { id: "hacker", name: "Hacker Terminal", dots: ["#040704", "#26ff7d", "#0fca55"] },
+];
+function applyTheme(id, save = true) {
+  const t = THEMES.find((x) => x.id === id) || THEMES[0];
+  document.body.dataset.theme = t.id;
+  if (t.id !== "capcut") document.body.classList.remove("cc-gal");
+  if (save) { try { localStorage.setItem("pixanva_theme", t.id); } catch {} }
+  renderThemePicker();
+  setStatus(`tema: ${t.name}`);
+}
+function renderThemePicker() {
+  const g = $("#themeGrid");
+  if (!g) return;
+  g.innerHTML = "";
+  for (const t of THEMES) {
+    const b = document.createElement("button");
+    b.className = "theme-card" + (document.body.dataset.theme === t.id ? " on" : "");
+    b.innerHTML = `<span class="tc-dots">${t.dots.map((d) => `<i style="background:${d}"></i>`).join("")}</span><span>${t.name}</span>`;
+    b.onclick = () => applyTheme(t.id);
+    g.appendChild(b);
+  }
 }
 
+// ---------- layar loading toggle (reaktif) ----------
 function applyGenfx(on) {
   state.genfx = !!on;
   $("#swGenfx").classList.toggle("on", state.genfx);
   $("#swGenfx").setAttribute("aria-pressed", state.genfx ? "true" : "false");
-  if (!state.genfx) hideOverlay();
+  // REAKTIF walau lagi generate: toggle mid-run langsung ngefek
+  if (!state.genfx) {
+    hideOverlay();
+    if (state.generating) clearRevealNow();
+  } else if (state.generating) {
+    showOverlay();
+  }
   try { localStorage.setItem("pixanva_genfx", state.genfx ? "1" : "0"); } catch {}
 }
 
@@ -820,6 +879,17 @@ function startVarRun(rg, opts) {
   vg.innerHTML = ""; vg.hidden = false;
   $("#canvas").style.display = "none";
   $("#stageEmpty").style.display = "none";
+  // lapisan reveal per sel (di atas grid yang di-blur sekali)
+  const vr = $("#varReveal");
+  vr.innerHTML = "";
+  vr.style.opacity = "1";
+  revCtxs = conds.map(() => {
+    const cv = document.createElement("canvas");
+    cv.width = rg.out; cv.height = rg.out;
+    vr.appendChild(cv);
+    return cv.getContext("2d");
+  });
+  vr.hidden = false;
   state.painters = conds.map((c, i) => {
     const cell = document.createElement("div");
     cell.className = "var-cell";
@@ -861,25 +931,20 @@ function finishVarCell(m) {
     getWorker().postMessage({ type: "gen", cond: q.conds[q.cur], opts: q.opts });
     return;
   }
-  // semua sel beres — simpan 4-nya ke galeri + reveal sinematik rame-rame
+  // semua sel beres — simpan 4-nya ke galeri (reveal-nya udah jalan live per baris)
   state.generating = false;
   state.varQ = null;
   $("#btnGen").disabled = false;
   $("#btnGen").textContent = "Generate";
   hideOverlay();
+  if (state.genfx) clearRevealSoon();
+  else brushHide();
   const dt = ((performance.now() - genStart) / 1000).toFixed(1);
   $("#paintInfo").textContent = `4 variasi • ${dt}s — klik salah satu buat jadi utama`;
   setStatus("4 variasi siap");
   const cond0 = { scene: state.scene, color: state.color, mood: state.mood, orn: [...state.orn] };
   q.results.forEach((r, i2) => {
     saveOneCanvas(state.painters[i2].cv, cond0, r.seed, q.rg.G, q.rg.out);
-    if (state.genfx) {
-      const p2 = state.painters[i2];
-      p2.ctx.fillStyle = "#0b0d11";
-      p2.ctx.fillRect(0, 0, p2.out, p2.out);
-      cinematicReveal(p2, r.tokens, null, 350 + i2 * 190,
-        { x: (i2 % 2) * 0.5, y: Math.floor(i2 / 2) * 0.5, w: 0.5, h: 0.5 });
-    }
   });
   state.varRes = { results: q.results, conds: q.conds, opts: q.opts, rg: q.rg };
 }
@@ -935,15 +1000,356 @@ function wizAdvance() {
   if (curStep < WIZ_STEPS) setTimeout(() => showStep(curStep + 1), 230);
 }
 
+// ---------- asisten prompt: fab moveable + chat (otak rule-based dulu, LLM ±7M nyusul) ----------
+const AIState = { last: null, neg: [], busy: false };
+
+// sinonim → id tag (dari data.js) buat nangkep maksud user dari chat
+const SYN = {
+  scenes: {
+    gunung: ["gunung", "pegunungan", "puncak", "bukit", "mountain", "everest", "rinjani"],
+    laut: ["laut", "lautan", "samudra", "ocean", "segara", "laut dalam"],
+    hutan: ["hutan", "rimba", "jungle", "forest", "pepohonan", "hutan belantara"],
+    kota: ["kota", "urban", "city", "gedung", "downtown", "metropolis", "skyline"],
+    gurun: ["gurun", "desert", "sahara", "duna", "pasiran", "gurun pasir"],
+    angkasa: ["angkasa", "galaksi", "galaxy", "planet", "nebula", "orbit", "luar angkasa", "antariksa"],
+    aurora: ["aurora", "northern lights", "polar", "kutub utara"],
+    pantai: ["pantai", "beach", "pesisir", "tebing laut", "tepian"],
+    danau: ["danau", "telaga", "lake", "situ"],
+    sawah: ["sawah", "ladang", "rice field", "petak sawah", "pertanian", "perkebunan"],
+    kanjon: ["kanjon", "canyon", "ngarai", "jurang", "antelope"],
+    volkano: ["volkano", "volcano", "gunung api", "vulkan", "lava", "erupsi", "magma", "krakatau"],
+    bunga: ["bunga", "flower", "sakura", "ladang bunga", "tulip", "mawar", "sunflower"],
+    terjun: ["air terjun", "terjun", "waterfall", "curug", "coban"],
+    salju: ["salju", "snow", "tundra", "es kutub", "arctic", "bingkai es", "mountain salju"],
+    awan: ["lautan awan", "di atas awan", "cloud sea", "atas awan"],
+  },
+  colors: {
+    hangat: ["hangat", "warm", "oranye", "keemasan"],
+    dingin: ["dingin", "cool", "cold", "biru dingin"],
+    neon: ["neon", "cyberpunk", "cyber", "futuristik", "glow", "synthwave"],
+    pastel: ["pastel", "lembut warna", "soft warna", "candy"],
+    monokrom: ["monokrom", "monochrome", "hitam putih", "abu abu", "grayscale", "b&w"],
+    bumi: ["bumi", "earth tone", "coklat", "tanah", "natural warna"],
+    tropis: ["tropis", "tropical", "jungle vibe", "bali"],
+    gelap: ["gelap", "dark", "galap", "remang", "gothic"],
+    cerah: ["cerah", "bright", "terang", "vivid", " colorful"],
+    vintage: ["vintage", "retro", "jadul", "old school", "film look", "analog"],
+    es: ["es", "ice", "beku", "gletser", "glacier", "es biru"],
+    smaragd: ["smaragd", "emerald", "zamrud", "hijau zamrud"],
+  },
+  moods: {
+    pagi: ["pagi", "morning", "fajar", "sunrise", "subuh", "early morning"],
+    siang: ["siang", "noon", "midday", "terik"],
+    senja: ["senja", "sore", "sunset", "golden hour", "maghrib", "dusk"],
+    malam: ["malam", "night", "tengah malam", "midnight", "dini hari", "late night"],
+    kabut: ["kabut", "fog", "mist", "berkabut", "misty", "foggy"],
+    badai: ["badai", "storm", "hujan", "angin kencang", "tornado", "stormy"],
+    mystic: ["mystic", "mistis", "magis", "magic", "fantasy", "gaib", "legendaris", "epik", "epic"],
+    mimpi: ["mimpi", "dreamy", "dream", "surreal", "halus", "soft mood"],
+  },
+  orns: {
+    bintang: ["bintang", "star", "starry", "berbintang"],
+    bulan: ["bulan", "moon", "crescent", "purnama", "bulan sabit"],
+    matahari: ["matahari", "sun", "matahari terbenam", "sunset sun"],
+    awan: ["awan", "cloud", "mendung", "berawan"],
+    burung: ["burung", "bird", "kawanan burung", "flock"],
+    perahu: ["perahu", "boat", "kapal", "sampan", "sailboat", "perahu layar"],
+    balon: ["balon", "balon udara", "hot air balloon", "zeppelin"],
+    kupu: ["kupu", "kupu kupu", "butterfly", "kupu2"],
+    petir: ["petir", "lightning", "kilat", "thunder", "halilintar"],
+    pelangi: ["pelangi", "rainbow", "pelangi"],
+    meteor: ["meteor", "meteor shower", "hujan meteor", "komet", "comet"],
+    salju: ["hujan salju", "snowing", "salju turun", "snow fall"],
+    pohon: ["pohon", "tree", "pine", "cemara", "pohon cemara"],
+  },
+};
+const LBL = {};
+for (const g of ["scenes", "colors", "moods", "ornaments"])
+  for (const t of TAGS[g]) LBL[t.id] = t.label;
+
+const AI_LINES = {
+  ack: ["Oke bro, gw racik dulu 🔎", "Sip, ide bagus — bentar ya 🎨", "Noted! gw susun 3 opsi ✨", "Oke, gw gali ide dulu 🔍"],
+  deliver: ["Nih 3 pilihannya 👇", "Nih gw racik 3, tinggal pilih 👇", "3 opsi siap — klik salah satu 👇"],
+  reask: ["Oke gw racik ulang 🔄", "Bentar, gw ganti resepnya 🔄", "Oke, versi lain ya 🔄"],
+  notopic: [
+    "Bro kurang spesifik nih 😄 tapi santai — gw kasih 3 opsi seru dulu. Biar makin pas, sebut tempat/mood-nya, misal \"pantai senja\".",
+    "Hmm gw tebak-tebak nih 😅 nih 3 opsi acak enak. Next kali sebutin subjeknya ya bro.",
+  ],
+  hello: [
+    "Halo bro! 👋 Gw asisten prompt pixanva. Cerita aja mau gambar apa — misal \"gw mau bikin gunung enaknya gimana?\" — nanti gw kasih 3 set prompt tinggal pilih. Mau nge-blacklist tag? Pencet 🚫 negative prompt.",
+  ],
+};
+
+function aiNorm(s) {
+  return " " + s.toLowerCase()
+    .replace(/[^a-z0-9\s]/g, " ")
+    .replace(/\s+/g, " ").trim() + " ";
+}
+function synIds(norm, group) {
+  const out = [];
+  for (const [id, words] of Object.entries(SYN[group])) {
+    for (const w of words) {
+      if (norm.includes(" " + w + " ")) { out.push(id); break; }
+    }
+  }
+  return out;
+}
+function aiTopic(norm) {
+  const sc = synIds(norm, "scenes");
+  const co = synIds(norm, "colors");
+  const mo = synIds(norm, "moods");
+  const or = synIds(norm, "orns");
+  return {
+    scene: sc[0] || null, color: co[0] || null, mood: mo[0] || null,
+    orn: or.filter((x) => x !== sc[0]).slice(0, 2),
+    any: sc.length + co.length + mo.length + or.length > 0,
+  };
+}
+function aiParseNeg(norm) {
+  const found = new Set();
+  const re = /(?:jangan|jgn|ga usah|gak usah|gausah|tanpa|without|exclude)\s+(?:ada\s+|tag\s+|tags?\s+|pakai\s+|pake\s+)?([a-z0-9\s]+)/g;
+  let m;
+  while ((m = re.exec(norm))) {
+    const chunk = " " + m[1] + " ";
+    for (const g of Object.keys(SYN))
+      for (const [id, words] of Object.entries(SYN[g]))
+        if (words.some((w) => chunk.includes(" " + w + " "))) found.add(id);
+  }
+  return [...found];
+}
+function aiFieldNeg() {
+  const raw = ($("#aiNegInput").value || "").toLowerCase();
+  if (!raw.trim()) return [];
+  const out = new Set();
+  for (const part of raw.split(/[,;]/)) {
+    const p = aiNorm(part);
+    if (!p.trim()) continue;
+    for (const g of Object.keys(SYN))
+      for (const [id, words] of Object.entries(SYN[g]))
+        if (words.some((w) => p.includes(" " + w + " ")) || p.includes(" " + (LBL[id] || "").toLowerCase() + " "))
+          out.add(id);
+  }
+  return [...out];
+}
+const aiR = (a) => a[Math.floor(Math.random() * a.length)];
+function aiSets(topic, negs) {
+  const neg = new Set(negs);
+  const pool = (g) => TAGS[g].filter((t) => !neg.has(t.id));
+  const scenes = pool("scenes"), colors = pool("colors"), moods = pool("moods"), orns = pool("ornaments");
+  const rec = [
+    { nm: "Set 1 — aman & enak", mood: ["senja", "pagi", "siang", "mimpi"], orn: ["awan", "burung", "perahu", "pohon", "matahari"] },
+    { nm: "Set 2 — dramatis", mood: ["malam", "badai", "kabut", "mystic"], orn: ["petir", "bulan", "meteor", "bintang"] },
+    { nm: "Set 3 — dreamy", mood: ["mimpi", "mystic", "kabut", "pagi"], orn: ["pelangi", "kupu", "balon", "bintang"] },
+  ];
+  return rec.map((r, i) => {
+    const scene = (topic.scene && !neg.has(topic.scene)) ? topic.scene
+      : (scenes.length ? aiR(scenes).id : "gunung");
+    const color = (topic.color && !neg.has(topic.color)) ? topic.color
+      : (colors.length ? aiR(colors).id : "hangat");
+    let mood = (i === 0 && topic.mood && !neg.has(topic.mood)) ? topic.mood : null;
+    if (!mood) {
+      const c = r.mood.filter((x) => !neg.has(x) && moods.some((t) => t.id === x));
+      mood = c.length ? aiR(c) : (moods.length ? aiR(moods).id : null);
+    }
+    const orn = topic.orn.filter((x) => !neg.has(x) && x !== scene && orns.some((t) => t.id === x));
+    if (orn.length < 2 && Math.random() < 0.8) {
+      const c = r.orn.filter((x) => !neg.has(x) && x !== scene && orns.some((t) => t.id === x) && !orn.includes(x));
+      if (c.length) orn.push(aiR(c));
+    }
+    return { name: r.nm, scene, color, mood, orn: orn.slice(0, 2) };
+  });
+}
+function aiPromptText(set) {
+  return [LBL[set.scene], LBL[set.color], set.mood ? LBL[set.mood] : null,
+    ...(set.orn || []).map((o) => LBL[o])].filter(Boolean).join(" • ");
+}
+function aiApplySet(set) {
+  if (!set.scene || !set.color) return;
+  state.scene = set.scene;
+  state.color = set.color;
+  state.mood = set.mood;
+  state.orn = [...(set.orn || [])];
+  setChipsOn("#chipsScene", state.scene);
+  setChipsOn("#chipsColor", state.color);
+  setChipsOn("#chipsMood", state.mood);
+  setChipsOn("#chipsOrn", state.orn);
+  showStep(1);
+  setStatus("ide asisten: " + aiPromptText(set));
+  const g = $("#btnGen");
+  g.classList.remove("pulse"); void g.offsetWidth;
+  g.classList.add("pulse");
+  setTimeout(() => g.classList.remove("pulse"), 3600);
+  $("#aiPanel").hidden = true;
+}
+function aiAddMsg(text, who = "ai") {
+  const d = document.createElement("div");
+  d.className = "ai-msg" + (who === "me" ? " me" : "");
+  d.textContent = text;
+  $("#aiMsgs").appendChild(d);
+  $("#aiMsgs").scrollTop = 1e9;
+}
+function aiAddOpts(sets) {
+  const wrap = document.createElement("div");
+  wrap.className = "ai-opts";
+  for (const s of sets) {
+    const b = document.createElement("button");
+    b.className = "ai-opt";
+    b.innerHTML = `<b>${s.name}</b><span></span>`;
+    b.querySelector("span").textContent = aiPromptText(s);
+    b.onclick = () => aiApplySet(s);
+    wrap.appendChild(b);
+  }
+  $("#aiMsgs").appendChild(wrap);
+  $("#aiMsgs").scrollTop = 1e9;
+}
+function aiReply(text, isReask = false) {
+  if (AIState.busy) return;
+  AIState.busy = true;
+  const norm = aiNorm(text || "");
+  const negs = [...new Set([...aiParseNeg(norm), ...aiFieldNeg()])];
+  const topic = aiTopic(norm);
+  // "lagi / ganti / versi lain" tanpa topik baru → treat sbg reask
+  if (!isReask && AIState.last && !topic.any && /\b(lagi|reask|ganti|versi lain|ulang|other)\b/.test(norm)) {
+    AIState.busy = false;
+    return aiReply("", true);
+  }
+  const T = isReask ? (AIState.last && AIState.last.any ? AIState.last : topic) : topic;
+  if (!isReask) AIState.last = topic;
+  AIState.neg = negs;
+  if (isReask) aiAddMsg(aiR(AI_LINES.reask));
+  else if (!topic.any && !negs.length) aiAddMsg(aiR(AI_LINES.hello));
+  else aiAddMsg(aiR(AI_LINES.ack));
+  if (negs.length) aiAddMsg("Oh iya — tag " + negs.map((n) => LBL[n] || n).join(", ") + " gw ilangin dari semua opsi 🚫");
+  if (!T.any && !isReask) aiAddMsg(aiR(AI_LINES.notopic));
+  else if (T.scene) aiAddMsg(`"${LBL[T.scene]}" ya — enak nih subjeknya, gw padu mood & ornamen buat 3 varian.`);
+  setTimeout(() => {
+    const sets = aiSets(T, negs);
+    aiAddMsg(aiR(AI_LINES.deliver));
+    aiAddOpts(sets);
+    $("#aiStatus").textContent = "3 set siap — klik buat pasang";
+    AIState.busy = false;
+  }, 340);
+}
+function aiSendMsg() {
+  const inp = $("#aiInput");
+  const v = inp.value.trim();
+  if (!v) return;
+  aiAddMsg(v, "me");
+  inp.value = "";
+  $("#aiStatus").textContent = "ngirim…";
+  aiReply(v);
+}
+// posisi panel: nempel di sisi fab yang ada ruang (kiri fab → panel kanan, dst)
+function placeAIPanel() {
+  const panel = $("#aiPanel"), fab = $("#aiFab");
+  if (innerWidth <= 640) { panel.style.left = panel.style.right = panel.style.top = ""; return; }
+  const wasHidden = panel.hidden;
+  panel.hidden = false;
+  panel.style.visibility = "hidden";
+  panel.style.left = "0px"; panel.style.top = "0px"; panel.style.right = "auto";
+  const fr = fab.getBoundingClientRect();
+  const pw = panel.offsetWidth, ph = panel.offsetHeight;
+  const left = (innerWidth - fr.right >= pw + 24)
+    ? fr.right + 14
+    : Math.max(12, fr.left - pw - 14);
+  const top = Math.max(12, Math.min(innerHeight - ph - 12, fr.top - 24));
+  panel.style.left = Math.round(left) + "px";
+  panel.style.top = Math.round(top) + "px";
+  panel.style.visibility = "";
+  panel.hidden = wasHidden;
+}
+function toggleAIPanel(force) {
+  const panel = $("#aiPanel");
+  const show = force !== undefined ? force : panel.hidden;
+  if (show) {
+    placeAIPanel();
+    panel.hidden = false;
+    setTimeout(() => $("#aiInput").focus(), 60);
+  } else {
+    panel.hidden = true;
+  }
+}
+function initAssistant() {
+  const fab = $("#aiFab");
+  // posisi tersimpan + clamp ke viewport
+  let pos = null;
+  try { pos = JSON.parse(localStorage.getItem("pixanva_fab") || "null"); } catch {}
+  const clampXY = (x, y) => [
+    Math.max(6, Math.min(innerWidth - 62, x)),
+    Math.max(6, Math.min(innerHeight - 62, y)),
+  ];
+  if (pos) {
+    const [x, y] = clampXY(pos.x, pos.y);
+    fab.style.left = x + "px"; fab.style.top = y + "px";
+  } else {
+    fab.style.right = "18px"; fab.style.bottom = "18px";
+  }
+  let drag = null, moved = false;
+  fab.addEventListener("pointerdown", (e) => {
+    drag = { x: e.clientX, y: e.clientY, ox: fab.offsetLeft, oy: fab.offsetTop };
+    moved = false;
+    try { fab.setPointerCapture(e.pointerId); } catch {}
+  });
+  fab.addEventListener("pointermove", (e) => {
+    if (!drag) return;
+    const dx = e.clientX - drag.x, dy = e.clientY - drag.y;
+    if (Math.abs(dx) + Math.abs(dy) > 7) moved = true;
+    if (moved) {
+      const [x, y] = clampXY(drag.ox + dx, drag.oy + dy);
+      fab.style.left = x + "px"; fab.style.top = y + "px";
+      fab.style.right = "auto"; fab.style.bottom = "auto";
+    }
+  });
+  fab.addEventListener("pointerup", () => {
+    if (drag && moved) {
+      try { localStorage.setItem("pixanva_fab", JSON.stringify({ x: fab.offsetLeft, y: fab.offsetTop })); } catch {}
+    } else if (drag && !moved) {
+      toggleAIPanel();
+    }
+    drag = null;
+  });
+  $("#aiClose").onclick = () => toggleAIPanel(false);
+  $("#aiSend").onclick = aiSendMsg;
+  $("#aiInput").addEventListener("keydown", (e) => { if (e.key === "Enter") aiSendMsg(); });
+  $("#aiReask").onclick = () => {
+    if (!AIState.last) {
+      aiAddMsg("Belum ada topik yang dibahas 😄 cerita dulu mau gambar apa.");
+      return;
+    }
+    $("#aiStatus").textContent = "ngirim…";
+    aiReply("", true);
+  };
+  $("#aiNegBtn").onclick = () => {
+    const row = $("#aiNegRow");
+    row.hidden = !row.hidden;
+    $("#aiNegBtn").classList.toggle("on", !row.hidden);
+    if (!row.hidden) $("#aiNegInput").focus();
+  };
+  // klik di luar panel & fab → tutup
+  document.addEventListener("pointerdown", (e) => {
+    const panel = $("#aiPanel");
+    if (panel.hidden) return;
+    if (!panel.contains(e.target) && !fab.contains(e.target)) toggleAIPanel(false);
+  });
+}
+
 // ---------- init ----------
 (async function init() {
   initChips();
   initEvents();
   renderGallery();
-  // mode capcut: default MATI kecuali user udah nyala-in sebelumnya
-  let cc = false;
-  try { cc = localStorage.getItem("pixanva_capcut") === "1"; } catch {}
-  applyCapcut(cc);
+  initAssistant();
+  // bunuh universal select (hitbox biru / drag text) — inputs tetap bisa diketik
+  document.addEventListener("selectstart", (e) => {
+    const t = e.target;
+    if (t && /^(INPUT|TEXTAREA)$/.test(t.tagName)) return;
+    e.preventDefault();
+  });
+  // tema: pakai tema tersimpan; migrasi dari toggle capcut lama
+  let th = null;
+  try { th = localStorage.getItem("pixanva_theme"); } catch {}
+  if (!th) { try { if (localStorage.getItem("pixanva_capcut") === "1") th = "capcut"; } catch {} }
+  applyTheme(th || "classic-dark", false);
   // layar loading blur: default NYALA kecuali user mati-in sebelumnya
   let fx = true;
   try { fx = localStorage.getItem("pixanva_genfx") !== "0"; } catch {}

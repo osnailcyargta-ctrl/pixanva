@@ -4,14 +4,13 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>Pixanva — AI Image Generator</title>
-<link rel="stylesheet" href="css/style.css">
+<link rel="stylesheet" href="css/style.css?v=v16">
 <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'><rect width='32' height='32' rx='7' fill='%230e1014'/><rect x='6' y='6' width='9' height='9' rx='2' fill='%236c7bff'/><rect x='17' y='6' width='9' height='9' rx='2' fill='%2339d98a'/><rect x='6' y='17' width='9' height='9' rx='2' fill='%23ffb648'/><rect x='17' y='17' width='9' height='9' rx='2' fill='%23ff5c7a'/></svg>">
 </head>
 <body>
 <div class="app">
   <!-- ===== SIDEBAR ===== -->
   <aside class="sidebar" id="sidebar">
-    <div class="sheet-handle" id="sheetHandle" title="Tutup"><i></i></div>
     <div class="logo">
       <div class="logo-mark">
         <span></span><span></span><span></span><span></span>
@@ -28,11 +27,6 @@
       <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round"><path d="M6 9l6 6 6-6"/></svg>
       More models
     </button>
-
-    <div class="section-label">Galeri <span class="muted" id="galCount"></span></div>
-    <div class="gallery" id="gallery">
-      <div class="gallery-empty">Belum ada karya.<br>Generate yang pertama.</div>
-    </div>
 
     <div class="sidebar-foot">
       <button class="btn ghost small" id="btnSettings">
@@ -51,6 +45,9 @@
       </div>
       <div class="topbar-right">
         <span class="muted" id="statusLine">siap</span>
+        <button class="iconbtn" id="btnModelsTop" title="Semua model">
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><rect x="3" y="3" width="7" height="7" rx="1.5"/><rect x="14" y="3" width="7" height="7" rx="1.5"/><rect x="3" y="14" width="7" height="7" rx="1.5"/><rect x="14" y="14" width="7" height="7" rx="1.5"/></svg>
+        </button>
         <button class="iconbtn" id="btnSettingsTop" title="Pengaturan">
           <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 1 1-4 0v-.09a1.65 1.65 0 0 0-1-1.51 1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 1 1 0-4h.09a1.65 1.65 0 0 0 1.51-1 1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06a1.65 1.65 0 0 0 1.82.33h.01a1.65 1.65 0 0 0 1-1.51V3a2 2 0 1 1 4 0v.09a1.65 1.65 0 0 0 1 1.51h.01a1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82v.01a1.65 1.65 0 0 0 1.51 1H21a2 2 0 1 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/></svg>
         </button>
@@ -61,7 +58,9 @@
       <div class="stage" id="stage">
         <div class="canvas-box" id="canvasBox">
           <canvas id="canvas" width="256" height="256"></canvas>
+          <canvas id="revealCv" hidden></canvas>
           <div class="var-grid" id="varGrid" hidden></div>
+          <div class="var-reveal" id="varReveal" hidden></div>
           <div class="gen-overlay" id="genOverlay" hidden>
             <div class="gen-spin"></div>
             <div class="progress gen-prog"><div id="genProgFill"></div></div>
@@ -82,6 +81,16 @@
         </span>
       </div>
     </div>
+
+    <section class="gallery-sec">
+      <div class="gal-head">
+        <div class="section-label">Galeri <span class="muted" id="galCount"></span></div>
+        <span class="muted">klik gambar buat buka lagi di kanvas</span>
+      </div>
+      <div class="gallery" id="gallery">
+        <div class="gallery-empty">Belum ada karya. Generate yang pertama, atau coba tombol dadu 🎲</div>
+      </div>
+    </section>
   </main>
 
   <!-- ===== PANEL KANAN ===== -->
@@ -159,6 +168,35 @@
   </aside>
 </div>
 
+<!-- ===== ASISTEN PROMPT: FAB + PANEL ===== -->
+<button class="ai-fab" id="aiFab" title="Asisten prompt — drag buat pindahin, klik buat buka"><span>✦</span></button>
+<section class="ai-panel" id="aiPanel" hidden>
+  <div class="ai-head">
+    <div class="ai-ava">✦</div>
+    <div class="ai-ht">
+      <div class="ai-title">Asisten Pixanva</div>
+      <div class="muted" id="aiStatus">siap bantu bikin ide prompt</div>
+    </div>
+    <button class="iconbtn" id="aiClose" title="tutup">
+      <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"><path d="M18 6L6 18M6 6l12 12"/></svg>
+    </button>
+  </div>
+  <div class="ai-msgs" id="aiMsgs">
+    <div class="ai-msg">Halo bro! 👋 cerita aja mau gambar apa — misal <i>"gw mau bikin gunung enaknya gimana?"</i> — nanti gw kasih 3 set prompt, tinggal pilih.</div>
+  </div>
+  <div class="ai-tools">
+    <button class="chip" id="aiReask" title="Minta 3 set baru">🔁 Minta versi lain</button>
+    <button class="chip" id="aiNegBtn" title="Tag yang gak mau ada">🚫 Negative prompt</button>
+  </div>
+  <div class="ai-negrow" id="aiNegRow" hidden>
+    <input id="aiNegInput" type="text" placeholder="jangan ada tag ini — pisah koma, misal: malam, badai">
+  </div>
+  <div class="ai-inrow">
+    <input id="aiInput" type="text" placeholder="misal: gw mau bikin pantai senja…">
+    <button class="btn primary" id="aiSend">Kirim</button>
+  </div>
+</section>
+
 <!-- ===== BOTTOM NAV (mode CapCut) ===== -->
 <nav class="capnav" id="capNav">
   <button class="cn-btn on" id="capBtnBuat">
@@ -208,21 +246,18 @@
     </div>
     <div class="modal-body">
       <div class="set-group">
-        <div class="set-title">Tampilan</div>
-        <div class="set-row">
-          <div class="set-info">
-            <b>Menu gaya CapCut</b>
-            <small>Ubah seluruh UI jadi ala editor CapCut: hitam pekat, navigasi bawah,
-            panel &amp; galeri geser dari bawah. Default mati.</small>
-          </div>
-          <button class="switch" id="swCapcut" aria-pressed="false" title="Toggle menu CapCut"><i></i></button>
-        </div>
+        <div class="set-title">Tema</div>
+        <div class="theme-grid" id="themeGrid"></div>
+      </div>
+      <div class="set-group">
+        <div class="set-title">Generate</div>
         <div class="set-row">
           <div class="set-info">
             <b>Layar loading saat generate</b>
-            <small>Sel gambar di-blur + lingkaran loading + progress bar + tulisan
-            "generating…" selama model ngitung, lalu gambar di-reveal sinematik per-layer.
-            Matikan kalau mau lihat pelukisan langsung sel-per-sel.</small>
+            <small>Seluruh gambar diblur sekali (bukan per sel) + lingkaran loading +
+            progress bar + tulisan "generating…". Tiap baris yang kelar langsung
+            ke-reveal pakai efek sinematik — jadi gak perlu nunggu generate selesai
+            buat bisa lihat hasilnya. Matikan kalau mau lihat pelukisan mentah sel-per-sel.</small>
           </div>
           <button class="switch" id="swGenfx" aria-pressed="true" title="Toggle layar loading"><i></i></button>
         </div>
@@ -283,14 +318,21 @@
       semua versi lama tetap bisa dipilih lewat <b>More models</b> — bisa di-sort
       <i>terbaru</i> / <i>terpintar</i> dan dibalik urutannya.</p>
       <p><b>Fitur:</b> variasi ×4 (satu prompt dilukis jadi 4 kandidat beda seed, tinggal pilih),
-      prompt dadu 🎲 buat yang males mikir, layar loading blur + progress, dan reveal sinematik
-      per-layer pakai kuas virtual.</p>
+      prompt dadu 🎲 buat yang males mikir, layar loading yang nge-blur <i>seluruh</i> gambar
+      sekali + reveal per baris real-time pakai kuas virtual, dan tombol asisten ✦ melayang
+      yang bisa di-drag — chat sama dia buat minta ide prompt: 3 pilihan set, bisa minta ulang,
+      ada negative prompt.</p>
+      <p><b>Tema:</b> 8 tema tampilan bisa diganti di Pengaturan — Classic Dark / Light /
+      Metalic, Paper Doodle, CapCut Typshit, Neon, Senja, dan Hacker Terminal. Mode CapCut
+      sekarang jadi salah satu tema (lengkap dengan navigasi bawah ala editor video).</p>
+      <p class="muted">Asisten prompt saat ini masih pakai otak rule-based lokal; LLM transformer
+      beneran (dilatih dari nol, ±7M parameter) lagi disiapkan buat ngambil alih posisinya.</p>
       <p class="muted">Posisi token: kondisi di (i, 0), sel gambar di (baris, kolom+16) lewat RoPE 2D
       faktoris — satu model bisa gambar berbagai resolusi grid.</p>
     </div>
   </div>
 </div>
 
-<script type="module" src="js/app.js?v=v15b"></script>
+<script type="module" src="js/app.js?v=v16"></script>
 </body>
 </html>
