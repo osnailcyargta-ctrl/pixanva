@@ -81,18 +81,19 @@ def sample_reply(P, stoi, itos, u_text, max_new=120, temp=0.8, topk=24, seed=1):
     rope = M.rope_tables(st_cap, 0, cfg)
     # prefill via forward penuh (cukup cepat utk sanity check)
     arr = np.array(ids, dtype=np.int64)[None, :]
-    logits = M.forward(P, cfg, arr, rope)[0]
+    rope = M.rope_tables(arr.shape[1], 0, cfg)
+    logits = M.forward(P, cfg, arr, rope)[0, -1]
     out = []
     recent = []
-    last = ids[-1]
     for t in range(max_new):
-        z = logits - logits.max()
-        p = np.exp(z) / np.exp(z).sum()
+        lg = logits.copy()
+        if recent:  # penalti pengulangan, sama strategi dgn worker.js
+            for w in set(recent[-24:]):
+                lg[w] /= 1.12
+        z = lg - lg.max()
+        p = np.exp(z)
         p[np.argsort(p)[:-topk]] = 0
         p /= p.sum()
-        if recent:
-            for w in set(recent[-24:]):
-                pass
         nid = int(rng.choice(len(p), p=p))
         if nid == CD.EOS:
             break

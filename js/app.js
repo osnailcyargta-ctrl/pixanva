@@ -1289,6 +1289,12 @@ function aiReply(text, isReask = false) {
   }, 340);
 }
 
+// rapikan spasi tanda baca dari tokenizer kata ("1 ." → "1.", "sip ," → "sip,")
+function aiPretty(s) {
+  return s.replace(/\s*sep\s*/g, " ")
+    .replace(/\s+([.,:!?=•])/g, "$1");
+}
+
 // streaming token LLM → bubble sementara; pas selesai di-re-render jadi bersih
 let aiStreamEl = null;
 let aiStreamBuf = "";
@@ -1299,24 +1305,40 @@ function aiStream(w) {
     $("#aiMsgs").appendChild(aiStreamEl);
   }
   aiStreamBuf += (aiStreamBuf ? " " : "") + w;
-  aiStreamEl.textContent = aiStreamBuf;
+  aiStreamEl.textContent = aiPretty(aiStreamBuf);
   $("#aiMsgs").scrollTop = 1e9;
 }
 function aiFinish(text) {
   if (aiStreamEl) { aiStreamEl.remove(); aiStreamEl = null; }
-  const buf = (text || aiStreamBuf || "").replace(/\s*sep\s*/g, " ");
+  const buf = aiPretty((text || aiStreamBuf || ""));
   aiStreamBuf = "";
-  const lines = buf.split(/\n+|(?<=[a-z0-9]) (?=[123][.)])/i);
+  // output model datar (tokenizer gak punya newline) → split sebelum "1." / "2." / "3."
+  const lines = buf.split(/\n+|(?<=\S) (?=[123][.)]\s)/);
   const sets = [], bubbles = [];
+  // token label → id tag: toleran teks nyangkut ("salju pilih yang sreg" → Salju + sisa jadi bubble)
+  const aiLabelOf = (tok) => {
+    const t = tok.replace(/\s*-\s*/g, "-").trim();
+    if (LBLREV[t.toLowerCase()]) return { id: LBLREV[t.toLowerCase()], rest: "" };
+    const words = t.split(" ");
+    for (let n = Math.min(2, words.length); n >= 1; n--) {
+      const cand = words.slice(0, n).join(" ").toLowerCase();
+      if (LBLREV[cand]) return { id: LBLREV[cand], rest: words.slice(n).join(" ").trim() };
+    }
+    return null;
+  };
   for (const raw of lines) {
     const line = raw.trim();
     if (!line) continue;
     const mm = line.match(/^([123])[.)]\s*(.+?)\s*=\s*(.+)$/);
     if (mm) {
-      const labels = mm[3].split("•").map((s) => s.trim()).filter(Boolean);
-      const ids = labels.map((s) => LBLREV[s.toLowerCase()]).filter(Boolean);
+      const ids = [], rest = [];
+      for (const tk of mm[3].split("•")) {
+        const L = aiLabelOf(tk);
+        if (L) { ids.push(L.id); if (L.rest) rest.push(L.rest); }
+      }
       if (ids.length >= 2) {
-        sets.push({ name: mm[2], labels, ids });
+        sets.push({ name: mm[2], ids });
+        for (const r of rest) bubbles.push(r);
         continue;
       }
     }
@@ -1324,6 +1346,7 @@ function aiFinish(text) {
   }
   for (const b of bubbles) {
     if (/^(nih|ini 3|3 opsi|tinggal pilih|klik salah)/i.test(b)) continue;
+    if (/cerita aja|sebut aja|coba ketik|misal /i.test(b)) continue; // jangan ada tutorial
     aiAddMsg(b);
   }
   if (sets.length) {

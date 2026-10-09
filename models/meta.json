@@ -107,6 +107,27 @@
    "ri": 6,
    "released": "2026-10-09",
    "main": true
+  },
+  {
+   "id": "assistant",
+   "label": "Pixanva Assistant",
+   "kind": "chat",
+   "hidden": true,
+   "version": "1.0",
+   "d": 256,
+   "L": 8,
+   "H": 8,
+   "params": 6903296,
+   "step": 2600,
+   "g48": false,
+   "val_loss": 0.4841444861894992,
+   "file": "models/assistant.bin",
+   "vocab": "models/chat_vocab.json",
+   "desc": "LLM chat dari nol \u2014 bikin ide prompt di tombol asisten",
+   "isNew": true,
+   "ri": 99,
+   "released": "2026-10-09",
+   "main": false
   }
  ],
  "palette": [

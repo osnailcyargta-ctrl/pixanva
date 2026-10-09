@@ -98,8 +98,8 @@ NOTOPIC = [
     "gw tebak tebak ya, ini 3 opsi acak enak",
 ]
 HELLO = [
-    "halo bro, gw asisten prompt pixanva. cerita aja mau gambar apa, misal gw mau bikin gunung enaknya gimana",
-    "hai bro, gw bisa bantu bikin ide prompt. sebut aja tempat atau mood nya, misal pantai senja",
+    "halo bro, gw asisten prompt pixanva, mau gambar apa nih",
+    "hai bro, gw bisa bantu bikin ide prompt, gas apa bro",
 ]
 THX_U = ["oke sip makasih bro", "mantap nih", "oke gw coba dulu", "sip dah"]
 THX_A = [
