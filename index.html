@@ -4,7 +4,7 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>Pixanva — AI Image Generator</title>
-<link rel="stylesheet" href="css/style.css?v=v19b">
+<link rel="stylesheet" href="css/style.css?v=v21">
 <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'><rect width='32' height='32' rx='7' fill='%230e1014'/><rect x='6' y='6' width='9' height='9' rx='2' fill='%236c7bff'/><rect x='17' y='6' width='9' height='9' rx='2' fill='%2339d98a'/><rect x='6' y='17' width='9' height='9' rx='2' fill='%23ffb648'/><rect x='17' y='17' width='9' height='9' rx='2' fill='%23ff5c7a'/></svg>">
 </head>
 <body>
@@ -97,6 +97,9 @@
   <aside class="panel">
     <div class="panel-head">Buat gambar</div>
 
+    <!-- pilihan model — cuma tampil di tema CapCut (sidebar ke-hidden di tema itu) -->
+    <div class="cap-models" id="capModels"></div>
+
     <div class="wiz-top">
       <div class="wiz-dots" id="wizDots"></div>
       <span class="muted" id="wizHint"></span>
@@ -110,11 +113,13 @@
     <div class="step" data-step="2">
       <div class="step-title"><span class="step-num">2</span> Warna</div>
       <div class="chips" id="chipsColor"></div>
+      <button class="btn ghost small skip" id="btnSkipColor">Lewati — warna diacak 🎲</button>
     </div>
 
     <div class="step" data-step="3">
       <div class="step-title"><span class="step-num">3</span> Suasana</div>
       <div class="chips" id="chipsMood"></div>
+      <button class="btn ghost small skip" id="btnSkipMood">Lewati — tanpa suasana</button>
     </div>
 
     <div class="step" data-step="4">
@@ -125,7 +130,8 @@
 
     <div class="wiz-nav">
       <button class="btn ghost small" id="btnBack" disabled>← Mundur</button>
-      <span class="muted">pilih otomatis lanjut ke step berikutnya</span>
+      <button class="btn ghost small" id="btnSkipAll" title="Warna diacak, tanpa suasana & ornamen — langsung melukis">⚡ Skip semua</button>
+      <span class="muted">pilih otomatis lanjut</span>
     </div>
 
     <div class="quick-row">
@@ -165,6 +171,10 @@
 
     <button class="btn primary big" id="btnGen" disabled>Memuat model…</button>
     <div class="progress" id="loadBar" hidden><div></div></div>
+    <div class="load-err" id="loadErr" hidden>
+      <span id="loadErrMsg"></span>
+      <button class="btn ghost small" id="btnLoadRetry">Coba lagi</button>
+    </div>
   </aside>
 </div>
 
@@ -323,14 +333,15 @@
       <p><b>Tema:</b> 8 tema tampilan bisa diganti di Pengaturan — Classic Dark / Light /
       Metalic, Paper Doodle, CapCut Typshit, Neon, Senja, dan Hacker Terminal. Mode CapCut
       sekarang jadi salah satu tema (lengkap dengan navigasi bawah ala editor video).</p>
-      <p class="muted">Asisten prompt saat ini masih pakai otak rule-based lokal; LLM transformer
-      beneran (dilatih dari nol, ±7M parameter) lagi disiapkan buat ngambil alih posisinya.</p>
+      <p class="muted">Asisten prompt sekarang diotaki <b>LLM transformer beneran</b> dilatih dari nol
+      (assistant.bin, ±6.9M parameter) yang jalan 100% di browser — kalau bobotnya belum ke-load,
+      dia otomatis turun ke otak rule-based biar tetap bisa diajak ngobrol.</p>
       <p class="muted">Posisi token: kondisi di (i, 0), sel gambar di (baris, kolom+16) lewat RoPE 2D
       faktoris — satu model bisa gambar berbagai resolusi grid.</p>
     </div>
   </div>
 </div>
 
-<script type="module" src="js/app.js?v=v20"></script>
+<script type="module" src="js/app.js?v=v21"></script>
 </body>
 </html>

@@ -32,8 +32,33 @@ export function mulberry32(seed) {
 }
 
 export async function fetchModel(url, onProgress) {
-  const res = await fetch(url);
-  if (!res.ok) throw new Error("gagal muat " + url);
+  // retry 3x — GitHub Pages di seluler suka gagal load tiba-tiba (jaringan pinggir jalan)
+  let lastErr = null;
+  for (let att = 0; att < 3; att++) {
+    try {
+      return await fetchOnce(url, onProgress);
+    } catch (e) {
+      lastErr = e;
+      if (att < 2) await new Promise((r) => setTimeout(r, 700 * (att + 1)));
+    }
+  }
+  throw lastErr;
+}
+
+async function fetchOnce(url, onProgress) {
+  // timeout 30 dtk per percobaan — koneksi gantung jangan bikin nunggu selamanya
+  const ac = new AbortController();
+  const tmr = setTimeout(() => ac.abort(), 30000);
+  try {
+    return await download(url, onProgress, ac.signal);
+  } finally {
+    clearTimeout(tmr);
+  }
+}
+
+async function download(url, onProgress, signal) {
+  const res = await fetch(url, { signal });
+  if (!res.ok) throw new Error("HTTP " + res.status + " — " + url);
   const total = +(res.headers.get("content-length") || 0);
   const reader = res.body.getReader();
   const chunks = [];

@@ -31,13 +31,14 @@ const state = {
   selVar: -1,
   genfx: true,          // overlay loading blur (persist, default nyala)
   aiLLM: false,         // LLM chat lokal siap? (fallback: rule-based)
+  loadTries: {},        // percobaan load gagal per model (buat retry otomatis)
 };
 
 // ---------- worker ----------
 function getWorker() {
   if (!state.worker) {
     // ?v= rilis — bust cache CDN/browser tiap deploy (Pages cache 10 menit)
-    state.worker = new Worker("js/worker.js?v=v19b", { type: "module" });
+    state.worker = new Worker("js/worker.js?v=v21", { type: "module" });
     state.worker.onmessage = onWorkerMsg;
     state.worker.onerror = (e) => setStatus("error worker: " + e.message);
   }
@@ -54,7 +55,9 @@ function onWorkerMsg(e) {
     setStatus(`memuat bobot ${(m.got / 1e6).toFixed(1)} / ${(m.total / 1e6).toFixed(1)} MB…`);
   } else if (m.type === "loaded") {
     state.loaded.add(m.model);
+    delete state.loadTries[m.model];
     $("#loadBar").hidden = true;
+    $("#loadErr").hidden = true;
     setStatus("siap");
     $("#btnGen").disabled = false;
     $("#btnGen").textContent = "Generate";
@@ -67,11 +70,18 @@ function onWorkerMsg(e) {
     else finishGen(m);
   } else if (m.type === "error") {
     console.error(m.msg);
-    setStatus("error — cek console");
-    $("#btnGen").disabled = false;
-    $("#btnGen").textContent = "Generate";
-    state.generating = false;
-    AIState.busy = false;
+    if (state.generating) {
+      // generate-nya gagal — pulihkan UI + pesan manusiawi (mobile gak punya console)
+      state.generating = false;
+      state.varQ = null;
+      AIState.busy = false;
+      hideOverlay();
+      $("#btnGen").disabled = false;
+      $("#btnGen").textContent = "Generate";
+      setStatus("generate gagal — coba lagi");
+    } else {
+      loadFailed(m.msg);
+    }
   } else if (m.type === "chatready") {
     state.aiLLM = !!m.ok;
     if (m.ok) {
@@ -81,6 +91,48 @@ function onWorkerMsg(e) {
     aiStream(m.w);
   } else if (m.type === "cdone") {
     aiFinish(m.text);
+  }
+}
+
+// ---------- load model anti-gagal: retry otomatis + kartu error ramah mobile ----------
+// mobile gak punya console — semua kegagalan load ditangani di UI, gak ada lagi "cek log"
+function loadModel() {
+  setStatus("memuat model…");
+  getWorker().postMessage({ type: "load", model: state.model });
+}
+function shortErr(msg) {
+  const s = String(msg || "");
+  if (/timeout|abort/i.test(s)) return "koneksi lambat";
+  if (/fetch|network|http|load/i.test(s)) return "jaringan";
+  return "error tak terduga";
+}
+function loadFailed(msg) {
+  const tries = (state.loadTries[state.model] || 0) + 1;
+  state.loadTries[state.model] = tries;
+  if (tries <= 3) {
+    setStatus(`model gagal ke-load — nge-retry otomatis (${tries}/3)…`);
+    setTimeout(loadModel, 900 * tries);
+    return;
+  }
+  $("#loadErrMsg").textContent =
+    `Model gagal ke-load 3x (${shortErr(msg)}). Biasanya cuma jaringan lagi lemot — ` +
+    "ketuk Coba lagi, atau pilih model yang lebih ringan di More models.";
+  $("#loadErr").hidden = false;
+  setStatus("model gagal ke-load");
+}
+async function bootModels() {
+  $("#loadErr").hidden = true;
+  try {
+    await initModels();
+    loadModel();
+    // LLM asisten: load di belakang (kalau bin-nya udah ada)
+    getWorker().postMessage({ type: "chatload" });
+  } catch (e) {
+    console.error(e);
+    $("#loadErrMsg").textContent =
+      "Gagal memuat daftar model (" + shortErr(e.message) + "). Ketuk Coba lagi buat nge-retry.";
+    $("#loadErr").hidden = false;
+    setStatus("gagal memuat daftar model");
   }
 }
 
@@ -630,10 +682,28 @@ function selectModel(id) {
   $("#cfg").value = d.cfg; $("#cfgVal").textContent = d.cfg;
   renderMainModels();
   renderModelsModal();
+  renderCapModels();
   state.loaded.delete(id); // force reload meta utk model ini kalau berganti
   if (state.worker) {
     getWorker().postMessage({ type: "load", model: id });
   }
+}
+
+// strip pilihan model buat tema CapCut — sidebar ke-hidden di tema itu,
+// jadi pemilih modelnya pindah ke atas panel "Buat gambar"
+function renderCapModels() {
+  const el = $("#capModels");
+  if (!el || !state.meta) return;
+  const all = state.meta.models.filter((m) => !m.hidden)
+    .sort((a, b) => (b.ri || 0) - (a.ri || 0) || (b.step || 0) - (a.step || 0));
+  el.innerHTML = all.map((m) =>
+    `<button class="chip cm-chip ${m.id === state.model ? "on" : ""}" data-id="${m.id}">` +
+    `${m.label.replace(/^Pixanva\s+/, "")}${m.isNew ? " ★" : ""}</button>`
+  ).join("") + '<button class="chip cm-chip" data-all="1">Semua…</button>';
+  el.querySelectorAll(".cm-chip").forEach((c) => (c.onclick = () => {
+    if (c.dataset.all) { $("#modelsModal").hidden = false; return; }
+    selectModel(c.dataset.id);
+  }));
 }
 
 // ---------- chips ----------
@@ -707,6 +777,36 @@ function initEvents() {
   $("#btnSkipOrn").onclick = () => {
     state.orn = [];
     $("#chipsOrn").querySelectorAll(".chip").forEach((c) => c.classList.remove("on"));
+  };
+  // skip step 2 & 3 — gak usah lewat satu-satu: warna diacak / suasana dibuang
+  const R = (a) => a[Math.floor(Math.random() * a.length)];
+  $("#btnSkipColor").onclick = () => {
+    state.color = R(TAGS.colors).id;
+    setChipsOn("#chipsColor", state.color);
+    showStep(3);
+  };
+  $("#btnSkipMood").onclick = () => {
+    state.mood = null;
+    setChipsOn("#chipsMood", null);
+    showStep(4);
+  };
+  $("#btnSkipAll").onclick = () => {
+    if (state.generating) return;
+    if (!state.scene) state.scene = R(TAGS.scenes).id;
+    if (!state.color) state.color = R(TAGS.colors).id;
+    state.mood = null;
+    state.orn = [];
+    setChipsOn("#chipsColor", state.color);
+    setChipsOn("#chipsMood", null);
+    setChipsOn("#chipsOrn", []);
+    startGen();
+  };
+  // retry load model dari kartu error
+  $("#btnLoadRetry").onclick = () => {
+    state.loadTries = {};
+    $("#loadErr").hidden = true;
+    if (!state.meta) bootModels();
+    else loadModel();
   };
   $("#btnBack").onclick = () => showStep(curStep - 1);
   $("#btnDownload").onclick = () => {
@@ -1397,6 +1497,9 @@ function toggleAIPanel(force) {
   if (show) {
     placeAIPanel();
     panel.hidden = false;
+    // animasi popup muncul — scale + naik + fade (di-retrigger tiap buka)
+    panel.classList.remove("pop"); void panel.offsetWidth;
+    panel.classList.add("pop");
     setTimeout(() => $("#aiInput").focus(), 60);
   } else {
     panel.hidden = true;
@@ -1496,13 +1599,6 @@ function initAssistant() {
   try { fx = localStorage.getItem("pixanva_genfx") !== "0"; } catch {}
   applyGenfx(fx);
   loadMmSort();
-  try {
-    await initModels();
-    getWorker().postMessage({ type: "load", model: state.model });
-    // LLM asisten: load di belakang (kalau bin-nya udah ada)
-    getWorker().postMessage({ type: "chatload" });
-  } catch (e) {
-    setStatus("gagal memuat meta: " + e.message);
-  }
+  await bootModels();
   showStep(1);
 })();

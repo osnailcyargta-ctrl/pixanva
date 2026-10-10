@@ -486,14 +486,19 @@ body[data-theme="capcut"] .modal-card {
    ============================================================ */
 
 /* ---------- blur SELURUH gambar sekali (bukan per sel) saat generate ---------- */
-/* blend warna beneran: gak digelapin, saturasi naik — hasilnya smeared warna yang jelas.
-   reveal per baris ikut di-blur — detail tajam baru muncul pas generate selesai */
+/* blur NORMAL yang enak dilihat: warna ke-blend lembut, warna & terang tetap asli —
+   gak digelapin, gak kelewat saturasi. reveal per baris ikut di-blur — detail tajam
+   baru muncul pas generate selesai */
 .canvas-box.generating #canvas,
 .canvas-box.generating .var-grid,
 .canvas-box.generating #revealCv,
 .canvas-box.generating .var-reveal canvas {
-  filter: blur(48px) saturate(1.65) brightness(1.14);
-  transform: scale(1.07);
+  filter: blur(26px) saturate(1.15) brightness(1.0);
+  transform: scale(1.03);
+}
+/* masuk-keluar blur mulus — bukan nyala/mati mendadak */
+#canvas, .var-grid, #revealCv, .var-reveal canvas {
+  transition: filter .45s ease, transform .45s ease;
 }
 
 /* ---------- overlay: spinner + progress + generating… ---------- */
@@ -910,3 +915,44 @@ body[data-theme="hacker"] .brush::after { border-color: rgba(38, 255, 125, .4); 
     bottom: 14px !important; top: auto !important; width: auto;
   }
 }
+
+/* ============================================================
+   RILIS V21 — blur normal, pilih model di tema CapCut,
+   kartu error load ramah mobile, animasi popup asisten
+   ============================================================ */
+
+/* strip pilihan model — cuma nongol di tema CapCut (sidebar ke-hidden di sana) */
+.cap-models {
+  display: none; gap: 6px; overflow-x: auto;
+  padding: 2px 14px 10px; scrollbar-width: none;
+}
+.cap-models::-webkit-scrollbar { display: none; }
+body[data-theme="capcut"] .cap-models { display: flex; }
+.cap-models .cm-chip {
+  flex: 0 0 auto; font-size: 11.5px; padding: 5px 11px;
+  white-space: nowrap;
+}
+.cap-models .cm-chip.on {
+  border-color: var(--accent);
+  background: rgba(34, 224, 196, .12);
+}
+
+/* kartu error load — pesan manusiawi + tombol coba lagi (gak ada lagi "cek log") */
+.load-err {
+  margin-top: 8px; padding: 9px 11px;
+  display: flex; align-items: center; gap: 10px;
+  font-size: 12px; line-height: 1.45; color: #ffcf7d;
+  background: rgba(255, 182, 72, .07);
+  border: 1px solid rgba(255, 182, 72, .28);
+  border-radius: 10px;
+}
+.load-err span { flex: 1; }
+.load-err .btn { flex: 0 0 auto; }
+
+/* animasi popup asisten kebuka — scale + naik + fade */
+@keyframes aiPop {
+  from { opacity: 0; transform: translateY(18px) scale(.86); }
+  60% { opacity: 1; }
+  to { opacity: 1; transform: translateY(0) scale(1); }
+}
+.ai-panel.pop { animation: aiPop .34s cubic-bezier(.3, 1.5, .45, 1); }
