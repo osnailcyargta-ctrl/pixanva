@@ -128,6 +128,28 @@
    "ri": 99,
    "released": "2026-10-09",
    "main": false
+  },
+  {
+   "id": "prompter",
+   "label": "Pixanva Prompter 5M",
+   "kind": "prompter",
+   "hidden": true,
+   "version": "5m",
+   "stage": "5m",
+   "d": 256,
+   "L": 6,
+   "H": 8,
+   "params": 4464896,
+   "step": 900,
+   "g48": false,
+   "val_loss": 0.9830729166666666,
+   "file": "models/prompter.bin",
+   "vocab": "models/prompt_vocab.json",
+   "desc": "AI custom-prompt \u2014 terjemahin teks bebas jadi tag buat generator gambar",
+   "isNew": true,
+   "ri": 100,
+   "released": "2026-10-10",
+   "main": false
   }
  ],
  "palette": [

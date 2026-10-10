@@ -4,7 +4,7 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>Pixanva — AI Image Generator</title>
-<link rel="stylesheet" href="css/style.css?v=v21">
+<link rel="stylesheet" href="css/style.css?v=v22">
 <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'><rect width='32' height='32' rx='7' fill='%230e1014'/><rect x='6' y='6' width='9' height='9' rx='2' fill='%236c7bff'/><rect x='17' y='6' width='9' height='9' rx='2' fill='%2339d98a'/><rect x='6' y='17' width='9' height='9' rx='2' fill='%23ffb648'/><rect x='17' y='17' width='9' height='9' rx='2' fill='%23ff5c7a'/></svg>">
 </head>
 <body>
@@ -94,8 +94,14 @@
   </main>
 
   <!-- ===== PANEL KANAN ===== -->
-  <aside class="panel">
-    <div class="panel-head">Buat gambar</div>
+  <aside class="panel" id="panel">
+    <div class="panel-head">
+      <span>Buat gambar</span>
+      <span class="mode-row">
+        <button class="chip mode-chip on" id="modeTag" title="Pilih tag step-by-step">🏷 Tag</button>
+        <button class="chip mode-chip" id="modeCustom" title="Ketik bebas — AI prompter yang racik tag-nya">✍️ Custom</button>
+      </span>
+    </div>
 
     <!-- pilihan model — cuma tampil di tema CapCut (sidebar ke-hidden di tema itu) -->
     <div class="cap-models" id="capModels"></div>
@@ -103,6 +109,12 @@
     <div class="wiz-top">
       <div class="wiz-dots" id="wizDots"></div>
       <span class="muted" id="wizHint"></span>
+    </div>
+
+    <!-- mode custom: teks bebas → prompter AI ngubah jadi tag -->
+    <div class="pm-row" id="pmRow">
+      <input id="pmInput" type="text" placeholder="ketik apa aja… misal: pantai senja ada perahu" autocomplete="off">
+      <button class="btn ghost small" id="pmDice" title="Contoh acak">🎲</button>
     </div>
 
     <div class="step active" data-step="1">
@@ -342,6 +354,6 @@
   </div>
 </div>
 
-<script type="module" src="js/app.js?v=v21"></script>
+<script type="module" src="js/app.js?v=v22"></script>
 </body>
 </html>

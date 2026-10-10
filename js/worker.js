@@ -4,6 +4,8 @@
 //   {type:'gen', cond, opts}        -> {type:'token'}* -> {type:'done'} / {type:'error'}
 //   {type:'chatload'}               -> {type:'chatready', ok}
 //   {type:'chat', texts, opts}      -> {type:'ctok'}* -> {type:'cdone', text} / {type:'error'}
+//   {type:'pmload'}                 -> {type:'pmready', ok}
+//   {type:'pm', text}               -> {type:'pmout', ok, scene, color, mood, orn}
 import { fetchModel, Pixanva, mulberry32, sampleToken } from "./engine.js";
 import { IDS } from "./data.js";
 
@@ -123,6 +125,15 @@ self.onmessage = async (e) => {
       }
     } else if (msg.type === "chat") {
       await chatGenerate(msg);
+    } else if (msg.type === "pmload") {
+      try {
+        await ensurePrompter();
+        self.postMessage({ type: "pmready", ok: true, params: pmer.meta.n_params });
+      } catch (err) {
+        self.postMessage({ type: "pmready", ok: false, msg: String(err) });
+      }
+    } else if (msg.type === "pm") {
+      await prompterParse(msg);
     }
   } catch (err) {
     self.postMessage({ type: "error", msg: String((err && err.stack) || err) });
@@ -177,4 +188,59 @@ async function chatGenerate(msg) {
     if (i < maxNew - 1) { model.step(st, tok, pos, 0); pos++; }
   }
   self.postMessage({ type: "cdone", text: out.join(" "), ms: performance.now() - t0 });
+}
+
+// ===== prompter custom-prompt (teks bebas → slot tag) =====
+// Arsitektur sama dgn chat LLM, cuma output-nya 5 slot fix: scene→color→mood→orn1→orn2.
+let pmer = null;
+async function ensurePrompter() {
+  if (pmer) return pmer;
+  const binURL = new URL("../models/prompter.bin?v=v22", self.location).href;
+  const { meta, W } = await fetchModel(binURL, () => {});
+  const model = new Pixanva(meta, W);
+  const vres = await fetch(new URL("../models/prompt_vocab.json", self.location).href);
+  if (!vres.ok) throw new Error("vocab prompter gak ketemu");
+  const vj = await vres.json();
+  const stoi = {};
+  vj.itos.forEach((w, i) => { if (w) stoi[w] = i; });
+  pmer = { meta, model, itos: vj.itos, stoi, S: vj.specials };
+  return pmer;
+}
+function tokTextPM(s) {
+  return s.toLowerCase().match(/[a-z0-9]+/g) || [];
+}
+async function prompterParse(msg) {
+  try {
+    const { model, itos, stoi, S } = await ensurePrompter();
+    const t0 = performance.now();
+    const words = tokTextPM(msg.text || "");
+    const ids = [S.BOS];
+    for (const w of words) {
+      if (stoi[w] !== undefined) ids.push(stoi[w]);
+    }
+    ids.push(S.A);
+    const st = model.newState(ids.length + 8);
+    let pos = 0;
+    for (const t of ids) { model.step(st, t, pos, 0); pos++; }
+    // 5 slot greedy — konsisten & cepat (T pendek, argmax paling stabil)
+    const out = [];
+    for (let i = 0; i < 5; i++) {
+      const lg = st.logits;
+      let best = 0, bv = -1e30;
+      for (let v = 0; v < model.V; v++) {
+        if (lg[v] > bv) { bv = lg[v]; best = v; }
+      }
+      out.push(itos[best] || "");
+      if (i < 4) { model.step(st, best, pos, 0); pos++; }
+    }
+    const tag = (w) => (w && w[0] === "@" && w !== "@none") ? w.slice(1) : null;
+    self.postMessage({
+      type: "pmout", ok: true, ms: performance.now() - t0,
+      scene: tag(out[0]), color: tag(out[1]),
+      mood: tag(out[2]),
+      orn: [tag(out[3]), tag(out[4])].filter(Boolean),
+    });
+  } catch (err) {
+    self.postMessage({ type: "pmout", ok: false, msg: String(err) });
+  }
 }

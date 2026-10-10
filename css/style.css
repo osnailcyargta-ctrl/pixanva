@@ -956,3 +956,21 @@ body[data-theme="capcut"] .cap-models { display: flex; }
   to { opacity: 1; transform: translateY(0) scale(1); }
 }
 .ai-panel.pop { animation: aiPop .34s cubic-bezier(.3, 1.5, .45, 1); }
+
+/* ---------- mode tag / custom (rilis prompter) ---------- */
+.panel-head { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
+.mode-row { display: inline-flex; gap: 5px; }
+.mode-chip { font-size: 11px; padding: 4px 10px; cursor: pointer; }
+.mode-chip.on {
+  border-color: var(--accent);
+  background: rgba(108, 123, 255, .14);
+  color: var(--text);
+}
+/* baris input custom: default ke-hide, nongol cuma pas mode custom */
+.pm-row { display: none; gap: 8px; padding: 2px 14px 10px; }
+.pm-row input { flex: 1; min-width: 0; font-size: 12.5px; }
+.panel.custom .pm-row { display: flex; }
+.panel.custom .step,
+.panel.custom .wiz-top,
+.panel.custom .wiz-nav { display: none; }
+.panel.custom .quick-row { padding-top: 2px; }

@@ -32,13 +32,17 @@ const state = {
   genfx: true,          // overlay loading blur (persist, default nyala)
   aiLLM: false,         // LLM chat lokal siap? (fallback: rule-based)
   loadTries: {},        // percobaan load gagal per model (buat retry otomatis)
+  pmMode: false,        // mode custom prompt aktif? (teks bebas → prompter)
+  pmReady: false,       // model prompter ke-load?
+  pmBusy: false,        // prompter lagi parsing teks?
+  pmText: "",           // teks custom terakhir
 };
 
 // ---------- worker ----------
 function getWorker() {
   if (!state.worker) {
     // ?v= rilis — bust cache CDN/browser tiap deploy (Pages cache 10 menit)
-    state.worker = new Worker("js/worker.js?v=v21", { type: "module" });
+    state.worker = new Worker("js/worker.js?v=v22", { type: "module" });
     state.worker.onmessage = onWorkerMsg;
     state.worker.onerror = (e) => setStatus("error worker: " + e.message);
   }
@@ -91,6 +95,17 @@ function onWorkerMsg(e) {
     aiStream(m.w);
   } else if (m.type === "cdone") {
     aiFinish(m.text);
+  } else if (m.type === "pmready") {
+    state.pmReady = !!m.ok;
+    if (m.ok && state.pmMode) setStatus(`prompter siap (${(m.params / 1e6).toFixed(1)}M) ✍️`);
+  } else if (m.type === "pmout") {
+    state.pmBusy = false;
+    if (!m.ok) {
+      console.warn("prompter gagal:", m.msg);
+      applyPmCond(pmRuleParse(state.pmText), "rule-based");
+      return;
+    }
+    applyPmCond({ scene: m.scene, color: m.color, mood: m.mood, orn: m.orn || [] }, "prompter");
   }
 }
 
@@ -127,6 +142,8 @@ async function bootModels() {
     loadModel();
     // LLM asisten: load di belakang (kalau bin-nya udah ada)
     getWorker().postMessage({ type: "chatload" });
+    // prompter custom-prompt: load di belakang juga (kalau bin-nya udah ada)
+    getWorker().postMessage({ type: "pmload" });
   } catch (e) {
     console.error(e);
     $("#loadErrMsg").textContent =
@@ -469,10 +486,52 @@ function clearRevealNow() {
 // ---------- generate ----------
 let genStart = 0;
 function startGen() {
+  if (state.pmMode) { startGenCustom(); return; }
   if (!state.scene || !state.color) {
     setStatus("pilih pemandangan & warna dulu");
     return;
   }
+  proceedStartGen();
+}
+
+// mode custom: teks bebas → prompter (model AI) → tag → generate
+function startGenCustom() {
+  const txt = ($("#pmInput").value || "").trim();
+  if (!txt) { setStatus("ketik dulu mau gambar apa ✍️"); return; }
+  if (state.generating) return;
+  state.pmText = txt;
+  if (state.pmReady) {
+    state.pmBusy = true;
+    setStatus("prompter nangkep maksud lo…");
+    getWorker().postMessage({ type: "pm", text: txt });
+    return;
+  }
+  // model prompter belum siap → parser rule-based lokal (tetap jalan)
+  applyPmCond(pmRuleParse(txt), "rule-based");
+}
+
+// parser rule-based — fallback kalau prompter belum ke-load (pakai kamus sinonim asisten)
+function pmRuleParse(txt) {
+  const t = aiTopic(aiNorm(txt));
+  return { scene: t.scene, color: t.color, mood: t.mood, orn: t.orn };
+}
+
+// terapin hasil parsing + langsung generate
+function applyPmCond(c, src) {
+  state.scene = c.scene || state.scene || TAGS.scenes[Math.floor(Math.random() * TAGS.scenes.length)].id;
+  state.color = c.color || TAGS.colors[Math.floor(Math.random() * TAGS.colors.length)].id;
+  state.mood = c.mood || null;
+  state.orn = (c.orn || []).filter(Boolean).slice(0, 2);
+  setChipsOn("#chipsScene", state.scene);
+  setChipsOn("#chipsColor", state.color);
+  setChipsOn("#chipsMood", state.mood);
+  setChipsOn("#chipsOrn", state.orn);
+  const parsed = promptText({ scene: state.scene, color: state.color, mood: state.mood, orn: state.orn });
+  setStatus(`${src}: "${state.pmText}" → ${parsed}`);
+  proceedStartGen();
+}
+
+function proceedStartGen() {
   if (state.generating) return;
   const model = state.model;
   if (!state.loaded.has(model)) {
@@ -895,6 +954,16 @@ function initEvents() {
 
   // ----- toggle layar loading blur (default nyala, persist; reaktif mid-generate) -----
   $("#swGenfx").onclick = () => applyGenfx(!state.genfx);
+
+  // ----- mode tag / custom -----
+  $("#modeTag").onclick = () => applyMode("tag");
+  $("#modeCustom").onclick = () => applyMode("custom");
+  $("#pmDice").onclick = () => {
+    $("#pmInput").value = PM_EXAMPLES[Math.floor(Math.random() * PM_EXAMPLES.length)];
+  };
+  $("#pmInput").addEventListener("keydown", (e) => {
+    if (e.key === "Enter") startGen();
+  });
 
   // ----- bottom nav (tema capcut) -----
   const setCapTab = (t) => {
@@ -1577,6 +1646,31 @@ function initAssistant() {
   });
 }
 
+// ganti mode tag <-> custom (persist)
+const PM_EXAMPLES = [
+  "pantai senja ada perahu",
+  "gunung salju pagi ada pohon cemara",
+  "kota malam neon berbintang",
+  "danau berkabut warna pastel ada burung",
+  "ladang bunga siang cerah ada kupu kupu",
+  "gurun senja hangat ada bulan",
+  "aurora malam es ada meteor",
+  "sawah pagi bumi ada pohon",
+  "air terjun tropis siang ada pelangi",
+  "angkasa mystic gelap ada galaksi",
+];
+function applyMode(m, save = true) {
+  state.pmMode = m === "custom";
+  const panel = $("#panel");
+  if (panel) panel.classList.toggle("custom", state.pmMode);
+  $("#modeTag").classList.toggle("on", !state.pmMode);
+  $("#modeCustom").classList.toggle("on", state.pmMode);
+  if (save) { try { localStorage.setItem("pixanva_pm_mode", state.pmMode ? "custom" : "tag"); } catch {} }
+  setStatus(state.pmMode
+    ? "mode custom — ketik bebas, AI yang racik tag-nya ✍️"
+    : "mode tag — pilih tag step-by-step");
+}
+
 // ---------- init ----------
 (async function init() {
   initChips();
@@ -1594,6 +1688,10 @@ function initAssistant() {
   try { th = localStorage.getItem("pixanva_theme"); } catch {}
   if (!th) { try { if (localStorage.getItem("pixanva_capcut") === "1") th = "capcut"; } catch {} }
   applyTheme(th || "classic-dark", false);
+  // mode prompt: tag / custom (persist)
+  let pmSaved = "tag";
+  try { pmSaved = localStorage.getItem("pixanva_pm_mode") || "tag"; } catch {}
+  applyMode(pmSaved === "custom" ? "custom" : "tag", false);
   // layar loading blur: default NYALA kecuali user mati-in sebelumnya
   let fx = true;
   try { fx = localStorage.getItem("pixanva_genfx") !== "0"; } catch {}
