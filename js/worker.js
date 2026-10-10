@@ -195,7 +195,7 @@ async function chatGenerate(msg) {
 let pmer = null;
 async function ensurePrompter() {
   if (pmer) return pmer;
-  const binURL = new URL("../models/prompter.bin?v=v22", self.location).href;
+  const binURL = new URL("../models/prompter.bin?v=v23", self.location).href;
   const { meta, W } = await fetchModel(binURL, () => {});
   const model = new Pixanva(meta, W);
   const vres = await fetch(new URL("../models/prompt_vocab.json", self.location).href);

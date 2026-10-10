@@ -174,11 +174,28 @@ def build_text(rng, cond):
     return " ".join(txt.split())
 
 
+# affinity mood → warna natural (biar warna implisit gak ngawur: "senja" → hangat dst)
+MOOD_COLOR_AFFINITY = {
+    "pagi": ["pastel", "hangat"],
+    "siang": ["cerah", "tropis"],
+    "senja": ["hangat", "vintage"],
+    "malam": ["gelap", "neon"],
+    "kabut": ["pastel", "monokrom"],
+    "badai": ["gelap", "dingin"],
+    "mystic": ["neon", "gelap"],
+    "mimpi": ["pastel", "es"],
+}
+
+
 def sample_cond(rng):
     cond = TG.sample_cond(rng)
     # mood lebih sering ada (70%) biar model jago nagkep suasana
     if rng.random() < 0.30:
         cond["mood"] = None
+    # warna natural pasangan mood-nya (kadang) — model belajar konteks implisit
+    if cond.get("mood") and rng.random() < 0.45:
+        cond["color"] = MOOD_COLOR_AFFINITY[cond["mood"]][
+            int(rng.integers(2) if hasattr(rng, "integers") else rng.randint(0, 1))]
     n = rng.integers(0, 4) if hasattr(rng, "integers") else rng.randint(0, 3)
     if not cond["orn"] and n and rng.random() < 0.6:
         import numpy as np
