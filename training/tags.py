@@ -84,6 +84,11 @@ GRID_TOKEN = {16: GRID16, 24: GRID24, 32: GRID32, 48: GRID48, 64: GRID64}
 # prob tag dibuang saat training (untuk CFG)
 UNCOND_P = 0.12
 
+# ---- token kelas Imajin (model gambar v3 + parser) — TIDAK dipakai model tag lama ----
+SEC_SUBJ, SEC_ATTR, SEC_SCOL, NONE_IMJ = 159, 160, 161, 162
+# subj 163..174, attr 175..182, scol 183..192 — peta lengkap di export_webdata → data.js
+VOCAB_IMJ = 193
+
 
 def sample_cond(rng, allow_missing=True):
     """Sample kombinasi tag acak. Return dict."""

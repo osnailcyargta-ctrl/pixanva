@@ -7,6 +7,7 @@ import numpy as np
 import palette as PA
 import tags as TG
 import model as M
+import imajin_data as ID
 from train import get_cfg, MODELS
 
 BASE = os.path.dirname(os.path.abspath(__file__))
@@ -14,22 +15,22 @@ ROOT = os.path.join(BASE, "..")
 
 # versi pixanva — heavy pake skema qwerty (q..m, lanjut w...), tiap huruf = +0.2
 VERSIONS = {
-    "light": "1.0",
+    "light": "1.0", "light13": "1.3",
     "dark": "1.0",
     "dark12": "1.2",
     "dark15": "1.5",
-    "heavy": "qq",
-    "heavyqw": "qw",
+    "heavy": "qq", "heavyqw": "qw", "heavyqr": "qr",
 }
 
 # urutan + tanggal rilis — dipakai sort "Terbaru" di popup More models
 RELEASES = {
     "light": (1, "2026-10-07"), "dark": (2, "2026-10-07"), "heavy": (3, "2026-10-07"),
     "dark12": (4, "2026-10-09"), "heavyqw": (5, "2026-10-09"), "dark15": (6, "2026-10-09"),
+    "light13": (7, "2026-10-10"), "heavyqr": (8, "2026-10-10"),
 }
 
 # 3 kartu utama di layar depan = versi terbaru tiap keluarga; sisanya masuk popup
-MAIN_MODELS = {"light", "heavyqw", "dark15"}
+MAIN_MODELS = {"light13", "heavyqr", "dark15"}
 
 # urutan meta.json = lama -> baru (ri = release index)
 MODEL_INFO = [
@@ -45,6 +46,10 @@ MODEL_INFO = [
          g48_thr=1880),
     dict(id="dark15", label="Pixanva Dark 1.5",   desc="Update 0.3 — parameter naik beneran (2.7M → 4.9M, 6 → 8 lapis)",
          g48_thr=1400, new=True),
+    dict(id="light13", label="Pixanva Light 1.3", desc="Update 0.3 — parameter naik beneran (813k → 1.9M, 4 → 6 lapis) — tetap ringan tapi makin tajam",
+         g48_thr=800, new=True),
+    dict(id="heavyqr", label="Pixanva Heavy QR",  desc="Update QW→QR — parameter naik beneran (6.4M → 10M, 8 → 10 lapis) — paling detail sepanjang masa",
+         g48_thr=700, new=True),
 ]
 
 
@@ -99,6 +104,12 @@ def export_webdata():
         "MOOD_IDS": TG.MOOD_IDS, "ORN_IDS": TG.ORN_IDS,
         "GRID_TOKEN": {str(k): v for k, v in TG.GRID_TOKEN.items()},
         "VOCAB": TG.VOCAB,
+        # kelas imajin (model gambar slot laten + parser) — gak dipakai model tag lama
+        "IMJ": {
+            "SEC_SUBJ": TG.SEC_SUBJ, "SEC_ATTR": TG.SEC_ATTR, "SEC_SCOL": TG.SEC_SCOL,
+            "NONE": TG.NONE_IMJ,
+            "SUBJ_IDS": ID.SUBJ_IDS, "ATTR_IDS": ID.ATTR_IDS, "SCOL_IDS": ID.SCOL_IDS,
+        },
     }
     js = (
         "// AUTO-GENERATED dari training/palette.py & tags.py — jangan edit manual\n"
@@ -137,7 +148,20 @@ def export_meta_all():
             "ri": ri, "released": rel,
             "main": name in MAIN_MODELS,
         })
-    with open(os.path.join(ROOT, "models", "meta.json"), "w") as f:
+    # PENTING: pertahankan model non-gambar (assistant, prompter) yang di-append
+    # script export lain — jangan sampai kehapus tiap re-export meta
+    keep_ids = {i["id"] for i in infos}
+    mp = os.path.join(ROOT, "models", "meta.json")
+    if os.path.exists(mp):
+        try:
+            with open(mp) as f:
+                prev = json.load(f)
+            for m in prev.get("models", []):
+                if m.get("id") not in keep_ids and m.get("kind"):
+                    infos.append(m)
+        except Exception:
+            pass
+    with open(mp, "w") as f:
         json.dump({"models": infos, "palette": PA.palette_hex()}, f, indent=1)
     print("models/meta.json ditulis")
 

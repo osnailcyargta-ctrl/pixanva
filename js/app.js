@@ -4,11 +4,13 @@ import { PALETTE, TAGS, IDS } from "./data.js";
 const $ = (s) => document.querySelector(s);
 const DEFAULTS = {
   light: { temp: 0.95, topk: 32, cfg: 1.3 },
+  light13: { temp: 0.93, topk: 28, cfg: 1.5 },
   dark: { temp: 0.90, topk: 24, cfg: 1.6 },
   dark12: { temp: 0.90, topk: 24, cfg: 1.7 },
   dark15: { temp: 0.88, topk: 22, cfg: 1.8 },
   heavy: { temp: 0.85, topk: 24, cfg: 1.6 },
   heavyqw: { temp: 0.85, topk: 24, cfg: 1.7 },
+  heavyqr: { temp: 0.84, topk: 24, cfg: 1.8 },
 };
 
 const state = {
@@ -32,9 +34,11 @@ const state = {
   genfx: true,          // overlay loading blur (persist, default nyala)
   aiLLM: false,         // LLM chat lokal siap? (fallback: rule-based)
   loadTries: {},        // percobaan load gagal per model (buat retry otomatis)
-  pmMode: false,        // mode custom prompt aktif? (teks bebas → prompter)
-  pmReady: false,       // model prompter ke-load?
-  pmBusy: false,        // prompter lagi parsing teks?
+  pmMode: false,        // mode custom prompt aktif? (teks bebas → imajin langsung)
+  imjReady: false,      // model imajin ke-load?
+  imjLoading: false,    // imajin lagi ke-load?
+  imjTries: 0,          // retry load imajin
+  pendingCustom: null,  // prompt yang nunggu imajin ke-load
   pmText: "",           // teks custom terakhir
 };
 
@@ -42,7 +46,7 @@ const state = {
 function getWorker() {
   if (!state.worker) {
     // ?v= rilis — bust cache CDN/browser tiap deploy (Pages cache 10 menit)
-    state.worker = new Worker("js/worker.js?v=v24", { type: "module" });
+    state.worker = new Worker("js/worker.js?v=v26", { type: "module" });
     state.worker.onmessage = onWorkerMsg;
     state.worker.onerror = (e) => setStatus("error worker: " + e.message);
   }
@@ -95,17 +99,29 @@ function onWorkerMsg(e) {
     aiStream(m.w);
   } else if (m.type === "cdone") {
     aiFinish(m.text);
-  } else if (m.type === "pmready") {
-    state.pmReady = !!m.ok;
-    if (m.ok && state.pmMode) setStatus(`prompter siap (${(m.params / 1e6).toFixed(1)}M) ✍️`);
-  } else if (m.type === "pmout") {
-    state.pmBusy = false;
-    if (!m.ok) {
-      console.warn("prompter gagal:", m.msg);
-      applyPmCond(pmRuleParse(state.pmText), "rule-based");
-      return;
+  } else if (m.type === "imjready") {
+    state.imjLoading = false;
+    if (m.ok) {
+      state.imjReady = true;
+      state.imjTries = 0;
+      if (state.pmMode && !state.generating) setStatus(`imajin siap (${(m.params / 1e6).toFixed(1)}M) ✍️`);
+      if (state.pendingCustom) {
+        const t = state.pendingCustom;
+        state.pendingCustom = null;
+        if (state.pmMode && !state.generating) { $("#pmInput").value = t; startGenCustom(); }
+      }
+    } else {
+      // load imajin gagal — retry otomatis 3x (mobile gak punya console)
+      state.imjTries++;
+      if (state.imjTries <= 3) {
+        setTimeout(() => {
+          state.imjLoading = true;
+          getWorker().postMessage({ type: "imjload" });
+        }, 900 * state.imjTries);
+      } else if (state.pmMode && !state.generating) {
+        setStatus("model custom gagal ke-load — coba refresh halaman");
+      }
     }
-    applyPmCond({ scene: m.scene, color: m.color, mood: m.mood, orn: m.orn || [] }, "prompter");
   }
 }
 
@@ -142,8 +158,8 @@ async function bootModels() {
     loadModel();
     // LLM asisten: load di belakang (kalau bin-nya udah ada)
     getWorker().postMessage({ type: "chatload" });
-    // prompter custom-prompt: load di belakang juga (kalau bin-nya udah ada)
-    getWorker().postMessage({ type: "pmload" });
+    // imajin custom-prompt: load di belakang juga (kalau bin-nya udah ada)
+    getWorker().postMessage({ type: "imjload" });
   } catch (e) {
     console.error(e);
     $("#loadErrMsg").textContent =
@@ -494,41 +510,41 @@ function startGen() {
   proceedStartGen();
 }
 
-// mode custom: teks bebas → prompter (model AI) → tag → generate
+// mode custom: teks bebas → model imajin → LANGSUNG dilukis (gak lewat tag).
+// Gak ada parser, gak ada chip — modelnya yang ngerti teks lo beneran.
 function startGenCustom() {
   const txt = ($("#pmInput").value || "").trim();
   if (!txt) { setStatus("ketik dulu mau gambar apa ✍️"); return; }
   if (state.generating) return;
-  state.pmText = txt;
-  if (state.pmReady) {
-    state.pmBusy = true;
-    setStatus("prompter nangkep maksud lo…");
-    getWorker().postMessage({ type: "pm", text: txt });
+  if (!state.imjReady) {
+    // model imajin belum ke-load — jangan diem, kasih status + auto-jalan pas siap
+    state.pendingCustom = txt;
+    if (!state.imjLoading) {
+      state.imjLoading = true;
+      getWorker().postMessage({ type: "imjload" });
+    }
+    setStatus(`model imajin lagi ke-load…${state.imjTries ? ` (coba ${state.imjTries}/3)` : ""} — bentar lagi langsung jalan`);
     return;
   }
-  // model prompter belum siap → parser rule-based lokal (tetap jalan)
-  applyPmCond(pmRuleParse(txt), "rule-based");
-}
-
-// parser rule-based — fallback kalau prompter belum ke-load (pakai kamus sinonim asisten)
-function pmRuleParse(txt) {
-  const t = aiTopic(aiNorm(txt));
-  return { scene: t.scene, color: t.color, mood: t.mood, orn: t.orn };
-}
-
-// terapin hasil parsing + langsung generate
-function applyPmCond(c, src) {
-  state.scene = c.scene || state.scene || TAGS.scenes[Math.floor(Math.random() * TAGS.scenes.length)].id;
-  state.color = c.color || TAGS.colors[Math.floor(Math.random() * TAGS.colors.length)].id;
-  state.mood = c.mood || null;
-  state.orn = (c.orn || []).filter(Boolean).slice(0, 2);
-  setChipsOn("#chipsScene", state.scene);
-  setChipsOn("#chipsColor", state.color);
-  setChipsOn("#chipsMood", state.mood);
-  setChipsOn("#chipsOrn", state.orn);
-  const parsed = promptText({ scene: state.scene, color: state.color, mood: state.mood, orn: state.orn });
-  setStatus(`${src}: "${state.pmText}" → ${parsed}`);
-  proceedStartGen();
+  state.pmText = txt;
+  if (!state.seedLock || !state.seed) state.seed = (Math.random() * 0xffffffff) >>> 0;
+  $("#seed").value = state.seed;
+  const rg = resolveGrid("imajin", parseInt($("#res").value, 10));
+  const opts = {
+    temp: parseFloat($("#temp").value),
+    topk: parseInt($("#topk").value, 10),
+    guidance: parseFloat($("#cfg").value),
+  };
+  state.lastRun = { cond: { text: txt, seed: state.seed }, opts, out: rg.out, custom: true };
+  if (state.varMode) { startVarRun(rg, opts, txt); return; }
+  state.generating = true;
+  $("#btnGen").disabled = true;
+  $("#btnGen").textContent = "Melukis…";
+  genStart = performance.now();
+  setupCanvas(rg.G, rg.out, rg.smooth);
+  showOverlay();
+  setStatus(`imajin: "${txt}"`);
+  getWorker().postMessage({ type: "imj", text: txt, G: rg.G, seed: state.seed, opts });
 }
 
 function proceedStartGen() {
@@ -604,7 +620,7 @@ function saveOneCanvas(cv, cond, seed, G, out) {
   items.unshift({
     img: up.toDataURL("image/png"),
     prompt: promptText(cond),
-    model: state.model,
+    model: cond.text ? "imajin" : state.model,
     seed,
     G,
     out,
@@ -643,6 +659,7 @@ function paintFromDataURL(src, G, out) {
 }
 
 function promptText(cond) {
+  if (cond.text) return cond.text;   // custom prompt — tampil persis yang user ketik
   const parts = [labelOf("scenes", cond.scene), labelOf("colors", cond.color)];
   if (cond.mood) parts.push(labelOf("moods", cond.mood));
   for (const o of cond.orn) parts.push(labelOf("ornaments", o));
@@ -1039,6 +1056,21 @@ function setChipsOn(sel, ids) {
 
 function startGenWith(cond, opts) {
   if (state.generating) return;
+  if (cond.text) {
+    // custom prompt (imajin) — ulang run lama (tombol lagi)
+    const out = (state.lastRun && state.lastRun.out) || 64;
+    const rg = resolveGrid("imajin", out);
+    cond.G = rg.G;
+    state.varQ = null;
+    state.generating = true;
+    $("#btnGen").disabled = true;
+    $("#btnGen").textContent = "Melukis…";
+    genStart = performance.now();
+    setupCanvas(rg.G, rg.out, rg.smooth);
+    showOverlay();
+    getWorker().postMessage({ type: "imj", text: cond.text, G: rg.G, seed: cond.seed, opts });
+    return;
+  }
   const out = (state.lastRun && state.lastRun.out) || cond.outPx || 64;
   const rg = resolveGrid(opts.model, out);
   cond.G = rg.G;
@@ -1053,18 +1085,20 @@ function startGenWith(cond, opts) {
 }
 
 // ---------- variasi ×4: satu prompt, 4 seed, grid 2×2 ----------
-function startVarRun(rg, opts) {
+function startVarRun(rg, opts, customText) {
   const seeds = [0, 1, 2, 3].map((i) =>
     state.seedLock && state.seed
       ? (state.seed + i * 101) >>> 0
       : (Math.random() * 0xffffffff) >>> 0);
   state.seed = seeds[0];
   $("#seed").value = seeds[0];
-  const conds = seeds.map((s) => ({
-    scene: state.scene, color: state.color, mood: state.mood,
-    orn: [...state.orn], G: rg.G, seed: s,
-  }));
-  state.varQ = { conds, opts, results: [], cur: 0, rg };
+  const conds = seeds.map((s) => customText
+    ? { text: customText, seed: s }
+    : {
+        scene: state.scene, color: state.color, mood: state.mood,
+        orn: [...state.orn], G: rg.G, seed: s,
+      });
+  state.varQ = { conds, opts, results: [], cur: 0, rg, custom: !!customText };
   currentG = rg.G; outPx = rg.out; curSmooth = rg.smooth;
   const vg = $("#varGrid");
   vg.innerHTML = ""; vg.hidden = false;
@@ -1105,7 +1139,11 @@ function startVarRun(rg, opts) {
   $("#btnGen").textContent = "Melukis ×4…";
   genStart = performance.now();
   showOverlay();
-  getWorker().postMessage({ type: "gen", cond: conds[0], opts });
+  if (customText) {
+    getWorker().postMessage({ type: "imj", text: customText, G: rg.G, seed: conds[0].seed, opts });
+  } else {
+    getWorker().postMessage({ type: "gen", cond: conds[0], opts });
+  }
 }
 
 function finishVarCell(m) {
@@ -1121,7 +1159,12 @@ function finishVarCell(m) {
   } else blitPainter(p);
   q.cur++;
   if (q.cur < 4) {
-    getWorker().postMessage({ type: "gen", cond: q.conds[q.cur], opts: q.opts });
+    const c = q.conds[q.cur];
+    if (q.custom) {
+      getWorker().postMessage({ type: "imj", text: c.text, G: q.rg.G, seed: c.seed, opts: q.opts });
+    } else {
+      getWorker().postMessage({ type: "gen", cond: c, opts: q.opts });
+    }
     return;
   }
   // semua sel beres — reveal sinematik per layer rame-rame (balik kayak dulu)
@@ -1134,7 +1177,9 @@ function finishVarCell(m) {
   const dt = ((performance.now() - genStart) / 1000).toFixed(1);
   $("#paintInfo").textContent = `4 variasi • ${dt}s — klik salah satu buat jadi utama`;
   setStatus("4 variasi siap");
-  const cond0 = { scene: state.scene, color: state.color, mood: state.mood, orn: [...state.orn] };
+  const cond0 = q.custom
+    ? { text: q.conds[0].text }
+    : { scene: state.scene, color: state.color, mood: state.mood, orn: [...state.orn] };
   q.results.forEach((r, i2) => {
     saveOneCanvas(state.painters[i2].cv, cond0, r.seed, q.rg.G, q.rg.out);
     // reveal per layer rame-rame — SELALU, gak ikut toggle blur loading
@@ -1648,16 +1693,16 @@ function initAssistant() {
 
 // ganti mode tag <-> custom (persist)
 const PM_EXAMPLES = [
-  "pantai senja ada perahu",
-  "gunung salju pagi ada pohon cemara",
-  "kota malam neon berbintang",
-  "danau berkabut warna pastel ada burung",
-  "ladang bunga siang cerah ada kupu kupu",
-  "gurun senja hangat ada bulan",
-  "aurora malam es ada meteor",
-  "sawah pagi bumi ada pohon",
-  "air terjun tropis siang ada pelangi",
-  "angkasa mystic gelap ada galaksi",
+  "ikan terbang di volkano",
+  "naga api raksasa di angkasa malam",
+  "kucing neon di kota malam ada petir",
+  "robot es raksasa di tundra salju",
+  "burung emas di pantai senja",
+  "kupu kupu kristal di hutan mystic",
+  "balon udara terbang di danau pagi",
+  "kapal di laut badai ada petir",
+  "rumah pohon di hutan kabut",
+  "gajah raksasa di sawah senja",
 ];
 function applyMode(m, save = true) {
   state.pmMode = m === "custom";
@@ -1667,7 +1712,7 @@ function applyMode(m, save = true) {
   $("#modeCustom").classList.toggle("on", state.pmMode);
   if (save) { try { localStorage.setItem("pixanva_pm_mode", state.pmMode ? "custom" : "tag"); } catch {} }
   setStatus(state.pmMode
-    ? "mode custom — ketik bebas, AI yang racik tag-nya ✍️"
+    ? "mode custom — ketik apa aja, AI nggambar langsung ✍️"
     : "mode tag — pilih tag step-by-step");
 }
 

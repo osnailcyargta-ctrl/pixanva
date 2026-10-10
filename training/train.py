@@ -24,6 +24,10 @@ MODELS = {
     "heavyqw": dict(d=256, L=8, H=8, mlp=1024, b16=8, b32=2, lr=2.6e-4, steps=1880, theta=1000.0, b48=1),
     # rilis 1.5 — parameter NAIK beneran (d 192→224, L 6→8, H 7, mlp 896) — training dari nol
     "dark15": dict(d=224, L=8, H=7, mlp=896, b16=10, b32=2,  lr=2.8e-4, steps=1400, theta=1000.0, b48=1),
+    # rilis 1.3 light — parameter naik beneran (813k → 1.88M, 4 → 6 lapis) — training dari nol
+    "light13": dict(d=160, L=6, H=4, mlp=640, b16=16, b32=6,  lr=3.2e-4, steps=800, theta=1000.0, b48=2),
+    # rilis QR heavy — parameter naik (6.36M → ~10M, 8 → 10 lapis) — training dari nol
+    "heavyqr": dict(d=288, L=10, H=8, mlp=1152, b16=6, b32=2, lr=2.4e-4, steps=700, theta=1000.0, b48=1),
 }
 
 VAL_SEED = 12345

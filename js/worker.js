@@ -4,8 +4,8 @@
 //   {type:'gen', cond, opts}        -> {type:'token'}* -> {type:'done'} / {type:'error'}
 //   {type:'chatload'}               -> {type:'chatready', ok}
 //   {type:'chat', texts, opts}      -> {type:'ctok'}* -> {type:'cdone', text} / {type:'error'}
-//   {type:'pmload'}                 -> {type:'pmready', ok}
-//   {type:'pm', text}               -> {type:'pmout', ok, scene, color, mood, orn}
+//   {type:'imjload'}               -> {type:'imjready', ok}
+//   {type:'imj', text, G, seed, opts} -> {type:'token'}* -> {type:'done'} / {type:'error'}
 import { fetchModel, Pixanva, mulberry32, sampleToken } from "./engine.js";
 import { IDS } from "./data.js";
 
@@ -125,15 +125,15 @@ self.onmessage = async (e) => {
       }
     } else if (msg.type === "chat") {
       await chatGenerate(msg);
-    } else if (msg.type === "pmload") {
+    } else if (msg.type === "imjload") {
       try {
-        await ensurePrompter();
-        self.postMessage({ type: "pmready", ok: true, params: pmer.meta.n_params });
+        await ensureImajin();
+        self.postMessage({ type: "imjready", ok: true, params: imj.meta.n_params });
       } catch (err) {
-        self.postMessage({ type: "pmready", ok: false, msg: String(err) });
+        self.postMessage({ type: "imjready", ok: false, msg: String(err) });
       }
-    } else if (msg.type === "pm") {
-      await prompterParse(msg);
+    } else if (msg.type === "imj") {
+      await imjGenerate(msg);
     }
   } catch (err) {
     self.postMessage({ type: "error", msg: String((err && err.stack) || err) });
@@ -190,57 +190,120 @@ async function chatGenerate(msg) {
   self.postMessage({ type: "cdone", text: out.join(" "), ms: performance.now() - t0 });
 }
 
-// ===== prompter custom-prompt (teks bebas → slot tag) =====
-// Arsitektur sama dgn chat LLM, cuma output-nya 5 slot fix: scene→color→mood→orn1→orn2.
-let pmer = null;
-async function ensurePrompter() {
-  if (pmer) return pmer;
-  const binURL = new URL("../models/prompter.bin?v=v24", self.location).href;
+// ===== imajin custom-prompt — teks bebas MASUK LANGSUNG ke model gambar =====
+// Format persis training v4: [BOS] kata.. [A] slot9x(latent, model sendiri yang
+// prediksi) [GRID_G] [SEP] kode_gambar..
+// Kata yang GAK dikenal vocab → [CHARW] + token karakter (open vocab) — jadi
+// prompt NGAWUR pun tetap ngaruh ke gambar. GAK ada lagi "prompt jadi tags":
+// gak ada parser, gak ada chip tag — slot-nya laten di dalam model.
+let imj = null;
+// token GRID = konstanta protokol training (tags.py GRID_TOKEN), GAK ikut vocab
+// (vocab json emang gak nyimpen ini — makanya S.GRID bakal undefined)
+const IMJ_GT = { 16: 8, 24: 9, 32: 10, 48: 11, 64: 12 };
+async function ensureImajin() {
+  if (imj) return imj;
+  const binURL = new URL("../models/imajin5m.bin?v=v26", self.location).href;
   const { meta, W } = await fetchModel(binURL, () => {});
   const model = new Pixanva(meta, W);
-  const vres = await fetch(new URL("../models/prompt_vocab.json", self.location).href);
-  if (!vres.ok) throw new Error("vocab prompter gak ketemu");
+  const vres = await fetch(new URL("../models/imajin_vocab.json?v=v26", self.location).href);
+  if (!vres.ok) throw new Error("vocab imajin gak ketemu");
   const vj = await vres.json();
   const stoi = {};
   vj.itos.forEach((w, i) => { if (w) stoi[w] = i; });
-  pmer = { meta, model, itos: vj.itos, stoi, S: vj.specials };
-  return pmer;
+  imj = { meta, model, stoi, S: vj.specials, CH: vj.chars || {} };
+  return imj;
 }
-function tokTextPM(s) {
+function tokTextImj(s) {
   return s.toLowerCase().match(/[a-z0-9]+/g) || [];
 }
-async function prompterParse(msg) {
-  try {
-    const { model, itos, stoi, S } = await ensurePrompter();
-    const t0 = performance.now();
-    const words = tokTextPM(msg.text || "");
-    const ids = [S.BOS];
-    for (const w of words) {
-      if (stoi[w] !== undefined) ids.push(stoi[w]);
-    }
-    ids.push(S.A);
-    const st = model.newState(ids.length + 8);
-    let pos = 0;
-    for (const t of ids) { model.step(st, t, pos, 0); pos++; }
-    // 5 slot greedy — konsisten & cepat (T pendek, argmax paling stabil)
-    const out = [];
-    for (let i = 0; i < 5; i++) {
-      const lg = st.logits;
-      let best = 0, bv = -1e30;
-      for (let v = 0; v < model.V; v++) {
-        if (lg[v] > bv) { bv = lg[v]; best = v; }
-      }
-      out.push(itos[best] || "");
-      if (i < 4) { model.step(st, best, pos, 0); pos++; }
-    }
-    const tag = (w) => (w && w[0] === "@" && w !== "@none") ? w.slice(1) : null;
-    self.postMessage({
-      type: "pmout", ok: true, ms: performance.now() - t0,
-      scene: tag(out[0]), color: tag(out[1]),
-      mood: tag(out[2]),
-      orn: [tag(out[3]), tag(out[4])].filter(Boolean),
-    });
-  } catch (err) {
-    self.postMessage({ type: "pmout", ok: false, msg: String(err) });
+// mirror 1:1 dgn training/imajin_data.py encode() — jalur inference (tanpa typo)
+function imjEncode(text) {
+  const { stoi, S, CH } = imj;
+  const ids = [S.BOS];
+  for (const w of tokTextImj(text).slice(0, 16)) {
+    const wid = stoi[w];
+    if (wid !== undefined && wid >= S.WORD_BASE) { ids.push(wid); continue; }
+    // kata gak dikenal / bukan kata → char fallback: [CHARW] c1..cn
+    ids.push(S.CHARW);
+    for (const ch of w) { const c = CH[ch]; if (c !== undefined) ids.push(c); }
+    if (ids.length >= 64) break;   // mirror max_txt training
   }
+  ids.push(S.A);
+  return ids;
+}
+// slot laten: model yang nyuruh sendiri kapan slot beres (keluar token GRID)
+// slot valid = tag lama 109..158 + NONE 162 + subj/attr/scol 163..192
+function imjArgmaxSlot(st, model) {
+  let best = -1, bv = -1e30;
+  const lg = st.logits;
+  for (let v = 8; v < 193; v++) {
+    if (v >= 13 && v < 109) continue;        // palet — bukan slot
+    if (v === 159 || v === 160 || v === 161) continue;  // marker [A]/SEC — bukan nilai slot
+    if (lg[v] > bv) { bv = lg[v]; best = v; }
+  }
+  return best;
+}
+async function imjGenerate(msg) {
+  const { text, G, seed, opts } = msg;
+  await ensureImajin();
+  const { model, S } = imj;
+  const t0 = performance.now();
+  const toks = imjEncode(text);
+  const total = G * G;
+  const useCFG = opts.guidance > 1.001;
+
+  // prefill teks + slot laten (greedy, dihentikan token GRID — persis training)
+  const stC = model.newState(toks.length + 14 + total + 2);
+  let pos = 0;
+  for (const t of toks) { model.step(stC, t, pos, 0); pos++; }
+  let gridTok = -1;
+  for (let i = 0; i < 12; i++) {
+    const s = imjArgmaxSlot(stC, model);
+    if (s >= 8 && s <= 12) { gridTok = s; break; }   // model bilang slot-nya udah cukup
+    model.step(stC, s, pos, 0); pos++;
+  }
+  if (gridTok < 0) gridTok = IMJ_GT[G] || 10;        // gagal berhenti → paksa
+  model.step(stC, gridTok, pos, 0); pos++;
+  model.step(stC, S.SEP, pos, 0); pos++;
+
+  // cabang uncond buat CFG (persis format training: [BOS, UNCOND, GRID, SEP])
+  let stU = null;
+  if (useCFG) {
+    const uToks = [S.BOS, S.UNCOND, (IMJ_GT[G] || 10), S.SEP];
+    stU = model.newState(uToks.length + total + 2);
+    for (let i = 0; i < uToks.length; i++) model.step(stU, uToks[i], i, 0);
+  }
+
+  const rng = mulberry32(seed >>> 0);
+  const recent = [];
+  const CO = IDS.COLOR_OFFSET;
+  const tokens = new Uint8Array(total);
+  let logitsC = stC.logits, logitsU = stU ? stU.logits : null;
+  const mixed = useCFG ? new Float32Array(model.V) : null;
+
+  for (let k = 0; k < total; k++) {
+    let logits;
+    if (useCFG) {
+      for (let v = 0; v < model.V; v++)
+        mixed[v] = logitsU[v] + opts.guidance * (logitsC[v] - logitsU[v]);
+      logits = mixed;
+    } else {
+      logits = logitsC;
+    }
+    const tok = sampleToken(logits, opts.temp, opts.topk, rng, recent, 1.12);
+    const color = tok - CO;
+    tokens[k] = color;
+    recent.push(tok);
+    if (recent.length > 12) recent.shift();
+
+    self.postMessage({ type: "token", i: k, c: color, total });
+
+    if (k < total - 1) {
+      const cx = Math.floor(k / G), cy = (k % G) + 16;
+      logitsC = model.step(stC, tok, cx, cy);
+      if (stU) logitsU = model.step(stU, tok, cx, cy);
+    }
+    if (k % 16 === 0) self.postMessage({ type: "beat", ms: performance.now() - t0, i: k, total });
+  }
+  self.postMessage({ type: "done", tokens: Array.from(tokens), ms: performance.now() - t0, G });
 }

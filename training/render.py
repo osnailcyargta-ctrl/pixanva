@@ -582,6 +582,11 @@ def render(cond, G, rng):
     mood = cond.get("mood")
     spec = next((m[2] for m in TG.MOODS if m[0] == mood), None)
     cv = grade(cv, cond["color"])
+    # subjek digambar SETELAH grade (warna eksplisit kata sifat tetap nempel),
+    # SEBELUM fog/glow (kena atmosfer dikit biar nyatu sama scene)
+    if cond.get("subj"):
+        from subjects import draw_subject
+        draw_subject(cv, G, rng, cond, ctx, sk)
     if spec:
         fogc = hsv(0.58, 0.05, 0.92) if mood == "kabut" else sk[1]
         if spec["fog"] > 0:
