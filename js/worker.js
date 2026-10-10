@@ -202,10 +202,10 @@ let imj = null;
 const IMJ_GT = { 16: 8, 24: 9, 32: 10, 48: 11, 64: 12 };
 async function ensureImajin() {
   if (imj) return imj;
-  const binURL = new URL("../models/imajin5m.bin?v=v26", self.location).href;
+  const binURL = new URL("../models/imajin5m.bin?v=v27", self.location).href;
   const { meta, W } = await fetchModel(binURL, () => {});
   const model = new Pixanva(meta, W);
-  const vres = await fetch(new URL("../models/imajin_vocab.json?v=v26", self.location).href);
+  const vres = await fetch(new URL("../models/imajin_vocab.json?v=v27", self.location).href);
   if (!vres.ok) throw new Error("vocab imajin gak ketemu");
   const vj = await vres.json();
   const stoi = {};
