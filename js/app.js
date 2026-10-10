@@ -46,7 +46,7 @@ const state = {
 function getWorker() {
   if (!state.worker) {
     // ?v= rilis — bust cache CDN/browser tiap deploy (Pages cache 10 menit)
-    state.worker = new Worker("js/worker.js?v=v27", { type: "module" });
+    state.worker = new Worker("js/worker.js?v=v28", { type: "module" });
     state.worker.onmessage = onWorkerMsg;
     state.worker.onerror = (e) => setStatus("error worker: " + e.message);
   }
@@ -678,7 +678,7 @@ function fmtMeta(m) {
 }
 
 async function initModels() {
-  const res = await fetch("models/meta.json?v=v27");
+  const res = await fetch("models/meta.json?v=v28");
   state.meta = await res.json();
   const mains = state.meta.models.filter((m) => m.main).sort((a, b) => (b.ri || 0) - (a.ri || 0));
   selectModel(mains.length ? mains[0].id : "heavyqw"); // default: model utama terbaru
