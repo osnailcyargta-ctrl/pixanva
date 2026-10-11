@@ -88,7 +88,7 @@
    "isNew": false,
    "ri": 5,
    "released": "2026-10-09",
-   "main": true
+   "main": false
   },
   {
    "id": "dark15",
@@ -123,6 +123,24 @@
    "desc": "Update 0.3 — parameter naik beneran (813k → 1.9M, 4 → 6 lapis) — tetap ringan tapi makin tajam",
    "isNew": true,
    "ri": 7,
+   "released": "2026-10-10",
+   "main": true
+  },
+  {
+   "id": "heavyqr",
+   "label": "Pixanva Heavy QR",
+   "version": "qr",
+   "d": 288,
+   "L": 10,
+   "H": 8,
+   "params": 10037088,
+   "step": 800,
+   "g48": true,
+   "val_loss": 0.8353511141843084,
+   "file": "models/heavyqr.bin",
+   "desc": "Update QW→QR — parameter naik beneran (6.4M → 10M, 8 → 10 lapis) — paling detail sepanjang masa",
+   "isNew": true,
+   "ri": 8,
    "released": "2026-10-10",
    "main": true
   },
